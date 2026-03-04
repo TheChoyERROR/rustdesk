@@ -21,7 +21,7 @@ const MONITORING_AVATAR_URL_ENV: &str = "RUSTDESK_MONITORING_AVATAR_URL";
 const MONITORING_AVATAR_URL_OPTION: &str = "monitoring-avatar-url";
 const MONITORING_AVATAR_PATH_OPTION: &str = "monitoring-avatar-path";
 const USER_INFO_OPTION: &str = "user_info";
-const MAX_LOCAL_AVATAR_BYTES: u64 = 512 * 1024;
+const MAX_LOCAL_AVATAR_BYTES: u64 = 2 * 1024 * 1024;
 
 const EVENT_SESSION_STARTED: &str = "session_started";
 const EVENT_SESSION_ENDED: &str = "session_ended";
