@@ -332,7 +332,13 @@ class MsgboxComponent: Reactor.Component {
                     path = selected;
                 }
             }
-            var input = this.$("input[name='avatar_url']");
+            var input = null;
+            for (var candidate in this.$$(.form input)) {
+                if (candidate.attributes["name"] == "avatar_url") {
+                    input = candidate;
+                    break;
+                }
+            }
             if (input) {
                 input.value = path;
             }

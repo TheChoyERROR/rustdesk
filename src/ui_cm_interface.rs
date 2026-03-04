@@ -2,6 +2,7 @@
 use crate::ipc::Connection;
 #[cfg(not(any(target_os = "ios")))]
 use crate::ipc::{self, Data};
+use crate::monitoring_event::{self, MonitoringDirection};
 #[cfg(target_os = "windows")]
 use crate::{clipboard::ClipboardSide, ipc::ClipboardNonFile};
 #[cfg(target_os = "windows")]
@@ -30,6 +31,7 @@ use hbb_common::{
     tokio::sync::Mutex as TokioMutex,
 };
 use serde_derive::Serialize;
+use serde_json::json;
 #[cfg(any(target_os = "android", target_os = "ios", feature = "flutter"))]
 use std::iter::FromIterator;
 #[cfg(not(any(target_os = "ios")))]
@@ -254,11 +256,50 @@ impl<T: InvokeUiCM> ConnectionManager<T> {
             in_voice_call: false,
             incoming_voice_call: false,
         };
-        CLIENTS
-            .write()
-            .unwrap()
-            .retain(|_, c| !(c.disconnected && c.peer_id == client.peer_id));
-        CLIENTS.write().unwrap().insert(id, client.clone());
+        let had_active_clients = {
+            let mut clients = CLIENTS.write().unwrap();
+            let had_active_clients = clients.values().any(|c| !c.disconnected);
+            clients.retain(|_, c| !(c.disconnected && c.peer_id == client.peer_id));
+            clients.insert(id, client.clone());
+            had_active_clients
+        };
+
+        let session_id = Config::get_id();
+        if !session_id.trim().is_empty() {
+            let participant_id = client.peer_id.clone();
+            let display_name = if client.name.trim().is_empty() {
+                None
+            } else {
+                Some(client.name.as_str())
+            };
+            if !had_active_clients {
+                monitoring_event::emit_session_started(
+                    session_id.clone(),
+                    participant_id.clone(),
+                    MonitoringDirection::Incoming,
+                    None,
+                );
+            }
+            monitoring_event::emit_participant_joined(
+                session_id.clone(),
+                participant_id.clone(),
+                MonitoringDirection::Incoming,
+                Some(monitoring_event::participant_meta(
+                    &participant_id,
+                    display_name,
+                    None,
+                )),
+            );
+            monitoring_event::emit_control_changed(
+                session_id,
+                participant_id.clone(),
+                MonitoringDirection::Incoming,
+                Some(json!({
+                    "participant_id": participant_id,
+                    "is_control_active": client.keyboard,
+                })),
+            );
+        }
         self.ui_handler.add_connection(&client);
     }
 
@@ -274,14 +315,48 @@ impl<T: InvokeUiCM> ConnectionManager<T> {
     }
 
     fn remove_connection(&self, id: i32, close: bool) {
-        if close {
-            CLIENTS.write().unwrap().remove(&id);
-        } else {
-            CLIENTS
-                .write()
-                .unwrap()
-                .get_mut(&id)
-                .map(|c| c.disconnected = true);
+        let (removed_client, has_active_clients) = {
+            let mut clients = CLIENTS.write().unwrap();
+            let removed_client = if close {
+                clients.remove(&id)
+            } else {
+                clients.get_mut(&id).map(|c| {
+                    c.disconnected = true;
+                    c.clone()
+                })
+            };
+            let has_active_clients = clients.values().any(|c| !c.disconnected);
+            (removed_client, has_active_clients)
+        };
+
+        if let Some(client) = removed_client {
+            let session_id = Config::get_id();
+            if !session_id.trim().is_empty() {
+                let participant_id = client.peer_id.clone();
+                let display_name = if client.name.trim().is_empty() {
+                    None
+                } else {
+                    Some(client.name.as_str())
+                };
+                monitoring_event::emit_participant_left(
+                    session_id.clone(),
+                    participant_id.clone(),
+                    MonitoringDirection::Incoming,
+                    Some(monitoring_event::participant_meta(
+                        &participant_id,
+                        display_name,
+                        None,
+                    )),
+                );
+                if !has_active_clients {
+                    monitoring_event::emit_session_ended(
+                        session_id,
+                        participant_id,
+                        MonitoringDirection::Incoming,
+                        None,
+                    );
+                }
+            }
         }
 
         #[cfg(target_os = "windows")]

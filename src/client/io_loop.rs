@@ -8,6 +8,7 @@ use crate::{
         QualityStatus, MILLI1, SEC30,
     },
     common::get_default_sound_input,
+    monitoring_event::{self, MonitoringDirection},
     ui_session_interface::{InvokeUiSession, Session},
 };
 #[cfg(feature = "unix-file-copy-paste")]
@@ -42,6 +43,7 @@ use hbb_common::{
 #[cfg(any(target_os = "windows", feature = "unix-file-copy-paste"))]
 use hbb_common::{tokio::sync::Mutex as TokioMutex, ResultType};
 use scrap::CodecFormat;
+use serde_json::json;
 use std::{
     collections::HashMap,
     ffi::c_void,
@@ -351,6 +353,26 @@ impl<T: InvokeUiSession> Remote<T> {
         #[cfg(any(target_os = "windows", feature = "unix-file-copy-paste"))]
         if self.handler.is_default() && _set_disconnected_ok {
             crate::clipboard::try_empty_clipboard_files(ClipboardSide::Client, self.client_conn_id);
+        }
+
+        if _set_disconnected_ok && self.is_connected {
+            let session_id = self.handler.get_id();
+            if !session_id.trim().is_empty() {
+                let user_id = monitoring_event::local_user_id();
+                monitoring_event::emit_participant_left(
+                    session_id.clone(),
+                    user_id.clone(),
+                    MonitoringDirection::Outgoing,
+                    Some(monitoring_event::local_participant_meta(&user_id)),
+                );
+                monitoring_event::emit_session_ended(
+                    session_id,
+                    user_id,
+                    MonitoringDirection::Outgoing,
+                    None,
+                );
+            }
+            self.is_connected = false;
         }
     }
 
@@ -1410,6 +1432,37 @@ impl<T: InvokeUiSession> Remote<T> {
                             self.handler.load_last_jobs();
                         }
 
+                        if !self.is_connected {
+                            let session_id = self.handler.get_id();
+                            if !session_id.trim().is_empty() {
+                                let user_id = monitoring_event::local_user_id();
+                                let participant_meta =
+                                    monitoring_event::local_participant_meta(&user_id);
+                                let control_enabled =
+                                    *self.handler.server_keyboard_enabled.read().unwrap();
+                                monitoring_event::emit_session_started(
+                                    session_id.clone(),
+                                    user_id.clone(),
+                                    MonitoringDirection::Outgoing,
+                                    None,
+                                );
+                                monitoring_event::emit_participant_joined(
+                                    session_id.clone(),
+                                    user_id.clone(),
+                                    MonitoringDirection::Outgoing,
+                                    Some(participant_meta),
+                                );
+                                monitoring_event::emit_control_changed(
+                                    session_id,
+                                    user_id.clone(),
+                                    MonitoringDirection::Outgoing,
+                                    Some(json!({
+                                        "participant_id": user_id,
+                                        "is_control_active": control_enabled,
+                                    })),
+                                );
+                            }
+                        }
                         self.is_connected = true;
                     }
                     _ => {}
@@ -1710,6 +1763,19 @@ impl<T: InvokeUiSession> Remote<T> {
                                 #[cfg(all(feature = "flutter", feature = "unix-file-copy-paste"))]
                                 crate::flutter::update_file_clipboard_required();
                                 self.handler.set_permission("keyboard", p.enabled);
+                                let session_id = self.handler.get_id();
+                                if !session_id.trim().is_empty() {
+                                    let user_id = monitoring_event::local_user_id();
+                                    monitoring_event::emit_control_changed(
+                                        session_id,
+                                        user_id.clone(),
+                                        MonitoringDirection::Outgoing,
+                                        Some(json!({
+                                            "participant_id": user_id,
+                                            "is_control_active": p.enabled,
+                                        })),
+                                    );
+                                }
                             }
                             Ok(Permission::Clipboard) => {
                                 *self.handler.server_clipboard_enabled.write().unwrap() = p.enabled;

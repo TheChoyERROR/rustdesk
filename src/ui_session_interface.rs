@@ -4,6 +4,7 @@ use crate::{
         MOUSE_BUTTON_LEFT, MOUSE_BUTTON_RIGHT, MOUSE_TYPE_DOWN, MOUSE_TYPE_MASK,
         MOUSE_TYPE_TRACKPAD, MOUSE_TYPE_UP, MOUSE_TYPE_WHEEL,
     },
+    monitoring_event::{self, MonitoringDirection},
     ui_interface::use_texture_render,
 };
 use async_trait::async_trait;
@@ -590,6 +591,20 @@ impl<T: InvokeUiSession> Session<T> {
         });
     }
 
+    fn monitoring_user_id(&self) -> String {
+        monitoring_event::local_user_id()
+    }
+
+    fn monitoring_session_id(&self) -> Option<String> {
+        let session_id = self.get_id();
+        let session_id = session_id.trim();
+        if session_id.is_empty() {
+            None
+        } else {
+            Some(session_id.to_owned())
+        }
+    }
+
     #[cfg(not(feature = "flutter"))]
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     pub fn is_xfce(&self) -> bool {
@@ -770,6 +785,18 @@ impl<T: InvokeUiSession> Session<T> {
         let mut msg_out = Message::new();
         msg_out.set_key_event(msg);
         self.send(Data::Message(msg_out));
+
+        if self.is_default() {
+            if let Some(session_id) = self.monitoring_session_id() {
+                monitoring_event::emit_participant_activity_throttled(
+                    session_id,
+                    self.monitoring_user_id(),
+                    MonitoringDirection::Outgoing,
+                    "keyboard",
+                    2_000,
+                );
+            }
+        }
     }
 
     pub fn send_chat(&self, text: String) {
@@ -1250,6 +1277,17 @@ impl<T: InvokeUiSession> Session<T> {
         }
 
         send_mouse(mask, x, y, alt, ctrl, shift, command, self);
+        if self.is_default() {
+            if let Some(session_id) = self.monitoring_session_id() {
+                monitoring_event::emit_participant_activity_throttled(
+                    session_id,
+                    self.monitoring_user_id(),
+                    MonitoringDirection::Outgoing,
+                    "mouse",
+                    2_000,
+                );
+            }
+        }
         // on macos, ctrl + left button down = right button down, up won't emit, so we need to
         // emit up myself if peer is not macos
         // to-do: how about ctrl + left from win to macos
