@@ -309,6 +309,35 @@ class MsgboxComponent: Reactor.Component {
             $(#folderPath).text = folder;
         }
     }
+
+    event click $(button#select_avatar_file) {
+        const filter = "Image file (*.png,*.jpg,*.jpeg,*.webp)";
+        const defaultExt = "png";
+        const initialPath = System.path(#USER_DOCUMENTS, "");
+        const caption = translate("Select avatar image");
+        var url = view.selectFile(#open, filter, defaultExt, initialPath, caption);
+        if (url) {
+            var selected = url;
+            // Some Sciter builds return an array even for single-file selection.
+            if (typeof selected != "string" && selected && selected.length) {
+                selected = selected[0];
+            }
+            var path = "";
+            if (typeof selected == "string") {
+                path = URL.toPath(selected) || "";
+                if (!path && selected.indexOf("file://") == 0) {
+                    path = selected.substring(7);
+                }
+                if (!path) {
+                    path = selected;
+                }
+            }
+            var input = this.$("input[name='avatar_url']");
+            if (input) {
+                input.value = path;
+            }
+        }
+    }
     
     function show_progress(show=1, err="") {
         if (show == -1) {

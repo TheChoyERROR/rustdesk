@@ -41,6 +41,7 @@ const default_option_yes = is_custom_client ? 'Y' : '';
 const default_option_no = is_custom_client ? 'N' : '';
 const default_option_whitelist = is_custom_client ? ',' : '';
 const default_option_approve_mode = is_custom_client ? 'password-click' : '';
+const monitoring_policy_option_key = "monitoring-policy-accepted-v1";
 
 const grey_text_style = "color:#888;";
 
@@ -374,6 +375,101 @@ function getAccountLabelWithHandle() {
     return '';
 }
 
+function getLocalUserInfo() {
+    try {
+        var user = JSON.parse(handler.get_local_option("user_info"));
+        if (user && typeof user == "object") {
+            return user;
+        }
+    } catch(e) {}
+    return {};
+}
+
+function normalizeAvatarValue(user) {
+    var avatar = (user.avatar_url || '').trim();
+    if (!avatar) avatar = (user.avatar_local_path || '').trim();
+    if (!avatar) avatar = (user.avatar || '').trim();
+    if (!avatar) avatar = (user.image || '').trim();
+    return avatar;
+}
+
+function open_monitoring_profile_dialog() {
+    var user_info = getLocalUserInfo();
+    var display_name0 = (user_info.display_name || user_info.name || "").trim();
+    var avatar_url0 = (handler.get_local_option("monitoring-avatar-url") || "").trim();
+    if (!avatar_url0) {
+        avatar_url0 = (handler.get_local_option("monitoring-avatar-path") || "").trim();
+    }
+    if (!avatar_url0) {
+        avatar_url0 = normalizeAvatarValue(user_info);
+    }
+    msgbox(
+        "custom-monitoring-profile",
+        translate("Monitoring profile"),
+        <div .form .set-password>
+            <div><span>{translate("Display Name")}:</span><input|text .outline-focus name="display_name" value={display_name0} /></div>
+            <div><span>{translate("Avatar URL")}:</span><input|text name="avatar_url" value={avatar_url0} /></div>
+            <div style="margin-bottom: 0.4em;"><button #select_avatar_file .link>{translate("Select image file")}</button></div>
+            <div style="font-size:0.9em; margin-bottom:0.4em;">{translate("monitoring_profile_avatar_tip")}</div>
+        </div>,
+        "",
+        function(res=null, show_progress) {
+            if (!res) return;
+            try {
+                if (typeof show_progress === "function") show_progress();
+                var display_name = (res.display_name || "").trim();
+                var avatar_input = (res.avatar_url || "").trim();
+                var avatar_url = "";
+                var avatar_local_path = "";
+                if (avatar_input) {
+                    if (avatar_input.match(/^https?:\/\/\S+$/i) || avatar_input.match(/^data:image\/[a-z0-9.+-]+;base64,/i)) {
+                        avatar_url = avatar_input;
+                    } else {
+                        avatar_local_path = avatar_input;
+                        if (avatar_local_path.indexOf("file://") == 0) {
+                            avatar_local_path = avatar_local_path.substring(7);
+                        }
+                    }
+                }
+
+                var updated = getLocalUserInfo();
+                if (!updated.name) {
+                    var fallback_name = (getUserName() || "").trim();
+                    if (!fallback_name) fallback_name = my_id;
+                    updated.name = fallback_name;
+                }
+                if (display_name) {
+                    updated.display_name = display_name;
+                } else {
+                    delete updated.display_name;
+                }
+                if (avatar_url) {
+                    updated.avatar_url = avatar_url;
+                    delete updated.avatar_local_path;
+                } else if (avatar_local_path) {
+                    updated.avatar_local_path = avatar_local_path;
+                    delete updated.avatar_url;
+                } else {
+                    delete updated.avatar_url;
+                    delete updated.avatar_local_path;
+                }
+
+                handler.set_local_option("monitoring-avatar-url", avatar_url);
+                handler.set_local_option("monitoring-avatar-path", avatar_local_path);
+                handler.set_local_option("user_info", JSON.stringify(updated));
+                if (myIdMenu) myIdMenu.update();
+                if (typeof show_progress === "function") show_progress(-1);
+                else closeMsgbox();
+                return;
+            } catch (e) {
+                return "" + e;
+            }
+        },
+        msgbox_default_height,
+        get_msgbox_width(700)
+    );
+}
+
 // Shared dialog functions
 function open_custom_server_dialog() {
     var configOptions = handler.get_options();
@@ -526,6 +622,7 @@ class MyIdMenu: Reactor.Component {
                 {!disable_settings && <li #allow-remote-config-modification><span>{svg_checkmark}</span>{translate('Enable remote configuration modification')}</li>}
                 {!disable_settings && <div .separator />}
                 {!disable_settings && !hide_server_settings && <li #custom-server>{translate('ID/Relay Server')}</li>}
+                {!disable_settings && <li #monitoring-profile>{translate('Monitoring profile')}</li>}
                 {!disable_settings && <li #whitelist title={translate('whitelist_tip')}>{translate('IP Whitelisting')}</li>}
                 {!disable_settings && !hide_proxy_settings && <li #socks5-server>{translate('Socks5/Http(s) Proxy')}</li>}
                 {!disable_settings && !hide_websocket_settings && <li #allow-websocket><span>{svg_checkmark}</span>{translate('Use WebSocket')}</li>}
@@ -624,6 +721,8 @@ class MyIdMenu: Reactor.Component {
             open_whitelist_dialog();
         } else if (me.id == "custom-server") {
             open_custom_server_dialog();
+        } else if (me.id == "monitoring-profile") {
+            open_monitoring_profile_dialog();
         } else if (me.id == "socks5-server") {
             open_proxy_dialog();
         } else if (me.id == "disable-udp") {
@@ -1337,6 +1436,29 @@ function self.ready() {
     }
     refreshCurrentUser();
     updateTheme();
+    showMonitoringPolicyNotice();
+}
+
+function showMonitoringPolicyNotice() {
+    if (handler.get_local_option(monitoring_policy_option_key) == "Y") return;
+    self.timer(120ms, function() {
+        msgbox(
+            "custom",
+            translate("Monitoring Policy"),
+            <div .form>
+                <div style="margin-bottom: 0.8em;">{translate("monitoring_policy_notice_intro")}</div>
+                <div style="margin-bottom: 0.8em;">{translate("monitoring_policy_notice_scope")}</div>
+                <div style="font-size: 0.95em; color: #666;">{translate("monitoring_policy_notice_ack")}</div>
+            </div>,
+            "",
+            function(res) {
+                if (!res) return;
+                handler.set_local_option(monitoring_policy_option_key, "Y");
+            },
+            240,
+            get_msgbox_width(620)
+        );
+    });
 }
 
 function showAbout() {
@@ -1450,6 +1572,20 @@ function set_local_user_info(user) {
     var user_info = {name: user.name};
     if (user.display_name) {
         user_info.display_name = user.display_name;
+    }
+    var avatar_url = normalizeAvatarValue(user);
+    if (avatar_url) {
+        user_info.avatar_url = avatar_url;
+        handler.set_local_option("monitoring-avatar-url", avatar_url);
+        handler.set_local_option("monitoring-avatar-path", "");
+    } else {
+        var local_avatar_url = (handler.get_local_option("monitoring-avatar-url") || "").trim();
+        var local_avatar_path = (handler.get_local_option("monitoring-avatar-path") || "").trim();
+        if (local_avatar_url) {
+            user_info.avatar_url = local_avatar_url;
+        } else if (local_avatar_path) {
+            user_info.avatar_local_path = local_avatar_path;
+        }
     }
     if (user.status) {
         user_info.status = user.status;
