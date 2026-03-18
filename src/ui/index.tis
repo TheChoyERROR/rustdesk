@@ -456,6 +456,7 @@ function open_monitoring_profile_dialog() {
 
                 handler.set_local_option("monitoring-avatar-url", avatar_url);
                 handler.set_local_option("monitoring-avatar-path", avatar_local_path);
+                handler.set_local_option("monitoring-display-name", display_name);
                 handler.set_local_option("user_info", JSON.stringify(updated));
                 if (myIdMenu) myIdMenu.update();
                 if (typeof show_progress === "function") show_progress(-1);

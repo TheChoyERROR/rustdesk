@@ -43,7 +43,6 @@ use hbb_common::{
 #[cfg(any(target_os = "windows", feature = "unix-file-copy-paste"))]
 use hbb_common::{tokio::sync::Mutex as TokioMutex, ResultType};
 use scrap::CodecFormat;
-use serde_json::json;
 use std::{
     collections::HashMap,
     ffi::c_void,
@@ -1456,10 +1455,10 @@ impl<T: InvokeUiSession> Remote<T> {
                                     session_id,
                                     user_id.clone(),
                                     MonitoringDirection::Outgoing,
-                                    Some(json!({
-                                        "participant_id": user_id,
-                                        "is_control_active": control_enabled,
-                                    })),
+                                    Some(monitoring_event::local_control_meta(
+                                        &user_id,
+                                        control_enabled,
+                                    )),
                                 );
                             }
                         }
@@ -1770,10 +1769,10 @@ impl<T: InvokeUiSession> Remote<T> {
                                         session_id,
                                         user_id.clone(),
                                         MonitoringDirection::Outgoing,
-                                        Some(json!({
-                                            "participant_id": user_id,
-                                            "is_control_active": p.enabled,
-                                        })),
+                                        Some(monitoring_event::local_control_meta(
+                                            &user_id,
+                                            p.enabled,
+                                        )),
                                     );
                                 }
                             }

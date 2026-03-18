@@ -17,6 +17,7 @@ import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:flutter_hbb/models/printer_model.dart';
 import 'package:flutter_hbb/models/server_model.dart';
 import 'package:flutter_hbb/models/state_model.dart';
+import 'package:flutter_hbb/models/user_model.dart';
 import 'package:flutter_hbb/plugin/manager.dart';
 import 'package:flutter_hbb/plugin/widgets/desktop_settings.dart';
 import 'package:get/get.dart';
@@ -2002,13 +2003,261 @@ class _Account extends StatefulWidget {
 }
 
 class _AccountState extends State<_Account> {
+  static const String _kMonitoringDisplayNameOption = 'monitoring-display-name';
+  static const String _kMonitoringAvatarUrlOption = 'monitoring-avatar-url';
+  static const String _kMonitoringAvatarPathOption = 'monitoring-avatar-path';
+
+  Map<String, dynamic> _getLocalUserInfo() {
+    final userInfo = UserModel.getLocalUserInfo();
+    if (userInfo == null) {
+      return <String, dynamic>{};
+    }
+    return Map<String, dynamic>.from(userInfo);
+  }
+
+  String _monitoringDisplayName() {
+    final localDisplayName =
+        bind.mainGetLocalOption(key: _kMonitoringDisplayNameOption).trim();
+    if (localDisplayName.isNotEmpty) {
+      return localDisplayName;
+    }
+
+    final userInfo = _getLocalUserInfo();
+    final userDisplayName = (userInfo['display_name'] ?? '').toString().trim();
+    if (userDisplayName.isNotEmpty) {
+      return userDisplayName;
+    }
+
+    final userName = (userInfo['name'] ?? '').toString().trim();
+    if (userName.isNotEmpty) {
+      return userName;
+    }
+
+    return '';
+  }
+
+  String _monitoringAvatarInput() {
+    final avatarUrl =
+        bind.mainGetLocalOption(key: _kMonitoringAvatarUrlOption).trim();
+    if (avatarUrl.isNotEmpty) {
+      return avatarUrl;
+    }
+
+    final avatarPath =
+        bind.mainGetLocalOption(key: _kMonitoringAvatarPathOption).trim();
+    if (avatarPath.isNotEmpty) {
+      return avatarPath;
+    }
+
+    final userInfo = _getLocalUserInfo();
+    for (final key in ['avatar_url', 'avatar_local_path', 'avatar', 'image']) {
+      final value = (userInfo[key] ?? '').toString().trim();
+      if (value.isNotEmpty) {
+        return value;
+      }
+    }
+
+    return '';
+  }
+
+  Widget monitoringProfile() {
+    text(String key, String value) {
+      return Align(
+        alignment: Alignment.centerLeft,
+        child: SelectionArea(child: Text('${translate(key)}: $value'))
+            .marginSymmetric(vertical: 4),
+      );
+    }
+
+    final displayName = _monitoringDisplayName();
+    final avatarInput = _monitoringAvatarInput();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _Button('Monitoring profile', openMonitoringProfileDialog),
+        if (displayName.isNotEmpty)
+          text('Display Name', displayName).marginOnly(left: 18, top: 12),
+        if (avatarInput.isNotEmpty)
+          text('Avatar URL', avatarInput).marginOnly(left: 18, top: 4),
+      ],
+    ).marginOnly(top: 12);
+  }
+
+  void openMonitoringProfileDialog() {
+    final displayNameController =
+        TextEditingController(text: _monitoringDisplayName());
+    final avatarController =
+        TextEditingController(text: _monitoringAvatarInput());
+    var errorText = '';
+    var isInProgress = false;
+
+    gFFI.dialogManager.show((setState, close, context) {
+      Future<void> submit() async {
+        setState(() {
+          errorText = '';
+          isInProgress = true;
+        });
+
+        var displayName = displayNameController.text.trim();
+        var avatarInput = avatarController.text.trim();
+        var avatarUrl = '';
+        var avatarLocalPath = '';
+
+        final isHttpUrl = RegExp(r'^https?:\/\/\S+$', caseSensitive: false);
+        final isDataImage =
+            RegExp(r'^data:image\/[a-z0-9.+-]+;base64,', caseSensitive: false);
+
+        if (avatarInput.isNotEmpty) {
+          if (isHttpUrl.hasMatch(avatarInput) ||
+              isDataImage.hasMatch(avatarInput)) {
+            avatarUrl = avatarInput;
+          } else {
+            if (avatarInput.startsWith('file://')) {
+              avatarInput = avatarInput.substring(7);
+            }
+            avatarLocalPath = avatarInput;
+          }
+        }
+
+        await bind.mainSetLocalOption(
+            key: _kMonitoringDisplayNameOption, value: displayName);
+        await bind.mainSetLocalOption(
+            key: _kMonitoringAvatarUrlOption, value: avatarUrl);
+        await bind.mainSetLocalOption(
+            key: _kMonitoringAvatarPathOption, value: avatarLocalPath);
+
+        if (mounted) {
+          setState(() {
+            isInProgress = false;
+          });
+        }
+        if (mounted) {
+          this.setState(() {});
+        }
+        close();
+      }
+
+      Future<void> pickAvatarFile() async {
+        final result = await FilePicker.platform.pickFiles(
+          type: FileType.custom,
+          allowedExtensions: const ['jpg', 'jpeg', 'png', 'webp'],
+        );
+        final selectedPath = result?.files.single.path?.trim() ?? '';
+        if (selectedPath.isEmpty) {
+          return;
+        }
+        setState(() {
+          avatarController.text = selectedPath;
+        });
+      }
+
+      return CustomAlertDialog(
+        title: Text(translate('Monitoring profile')),
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(minWidth: 520),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(minWidth: 140),
+                    child: Text(
+                      '${translate("Display Name")}:',
+                      textAlign: TextAlign.right,
+                    ).marginOnly(right: 10),
+                  ),
+                  Expanded(
+                    child: TextField(
+                      controller: displayNameController,
+                      autofocus: true,
+                      decoration: InputDecoration(
+                        hintText: translate('Display Name'),
+                      ),
+                    ).workaroundFreezeLinuxMint(),
+                  ),
+                ],
+              ).marginOnly(bottom: 8),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(minWidth: 140),
+                    child: Text(
+                      '${translate("Avatar URL")}:',
+                      textAlign: TextAlign.right,
+                    ).marginOnly(right: 10, top: 14),
+                  ),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        TextField(
+                          controller: avatarController,
+                          minLines: 1,
+                          maxLines: 3,
+                          decoration: InputDecoration(
+                            hintText: translate('Avatar URL'),
+                            errorText: errorText.isEmpty ? null : errorText,
+                          ),
+                        ).workaroundFreezeLinuxMint(),
+                        TextButton(
+                          onPressed: pickAvatarFile,
+                          child: Text(translate('Select image file')),
+                        ),
+                        Text(
+                          translate('monitoring_profile_avatar_tip'),
+                          style: Theme.of(context)
+                              .textTheme
+                              .bodySmall
+                              ?.copyWith(color: Colors.grey[700]),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          dialogButton(
+            'Cancel',
+            icon: const Icon(Icons.close_rounded),
+            onPressed: close,
+            isOutline: true,
+          ),
+          dialogButton(
+            'OK',
+            icon: isInProgress
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.done_rounded),
+            onPressed: isInProgress ? null : () => submit(),
+          ),
+        ],
+        onSubmit: isInProgress ? null : () => submit(),
+        onCancel: close,
+      );
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final scrollController = ScrollController();
     return ListView(
       controller: scrollController,
       children: [
-        _Card(title: 'Account', children: [accountAction(), useInfo()]),
+        _Card(title: 'Account', children: [
+          accountAction(),
+          useInfo(),
+          monitoringProfile(),
+        ]),
       ],
     ).marginOnly(bottom: _kListViewBottomMargin);
   }

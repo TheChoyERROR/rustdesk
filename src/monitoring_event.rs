@@ -7,7 +7,7 @@ use std::{
 
 use chrono::{SecondsFormat, Utc};
 use hbb_common::{
-    config::{Config, LocalConfig},
+    config::{keys, Config, LocalConfig},
     sodiumoxide::base64::{self, Variant},
     log, tokio, whoami,
 };
@@ -17,6 +17,7 @@ use uuid::Uuid;
 const MONITORING_URL_ENV: &str = "RUSTDESK_MONITORING_URL";
 const MONITORING_URL_OPTION: &str = "monitoring-server-url";
 const MONITORING_URL_OPTION_LEGACY: &str = "monitoring-server";
+const MONITORING_DISPLAY_NAME_OPTION: &str = "monitoring-display-name";
 const MONITORING_AVATAR_URL_ENV: &str = "RUSTDESK_MONITORING_AVATAR_URL";
 const MONITORING_AVATAR_URL_OPTION: &str = "monitoring-avatar-url";
 const MONITORING_AVATAR_PATH_OPTION: &str = "monitoring-avatar-path";
@@ -156,6 +157,22 @@ pub fn participant_meta(
     })
 }
 
+pub fn participant_control_meta(
+    participant_id: &str,
+    display_name: Option<&str>,
+    avatar_url: Option<&str>,
+    is_control_active: bool,
+) -> Value {
+    let mut meta = participant_meta(participant_id, display_name, avatar_url);
+    if let Some(object) = meta.as_object_mut() {
+        object.insert(
+            "is_control_active".to_owned(),
+            Value::Bool(is_control_active),
+        );
+    }
+    meta
+}
+
 pub fn local_user_id() -> String {
     let id = Config::get_id().trim().to_owned();
     if id.is_empty() {
@@ -166,6 +183,18 @@ pub fn local_user_id() -> String {
 }
 
 pub fn local_display_name(fallback_user_id: &str) -> String {
+    let monitoring_display_name = local_option_or_global_option(MONITORING_DISPLAY_NAME_OPTION);
+    let monitoring_display_name = monitoring_display_name.trim();
+    if !monitoring_display_name.is_empty() {
+        return monitoring_display_name.to_owned();
+    }
+
+    let built_in_display_name = crate::ui_interface::get_builtin_option(keys::OPTION_DISPLAY_NAME);
+    let built_in_display_name = built_in_display_name.trim();
+    if !built_in_display_name.is_empty() {
+        return built_in_display_name.to_owned();
+    }
+
     let alias = Config::get_option("alias").trim().to_owned();
     if !alias.is_empty() {
         return alias;
@@ -177,6 +206,12 @@ pub fn local_display_name(fallback_user_id: &str) -> String {
         {
             return name;
         }
+    }
+
+    let username = crate::username();
+    let username = username.trim();
+    if !username.is_empty() {
+        return username.to_owned();
     }
 
     fallback_user_id.trim().to_owned()
@@ -232,6 +267,17 @@ pub fn local_participant_meta(participant_id: &str) -> Value {
         participant_id,
         Some(display_name.as_str()),
         avatar_url.as_deref(),
+    )
+}
+
+pub fn local_control_meta(participant_id: &str, is_control_active: bool) -> Value {
+    let display_name = local_display_name(participant_id);
+    let avatar_url = local_avatar_url();
+    participant_control_meta(
+        participant_id,
+        Some(display_name.as_str()),
+        avatar_url.as_deref(),
+        is_control_active,
     )
 }
 

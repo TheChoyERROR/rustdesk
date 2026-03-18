@@ -27,11 +27,10 @@ use hbb_common::{
 };
 #[cfg(target_os = "windows")]
 use hbb_common::{
-    config::{keys::*, option2bool},
+    config::keys::*,
     tokio::sync::Mutex as TokioMutex,
 };
 use serde_derive::Serialize;
-use serde_json::json;
 #[cfg(any(target_os = "android", target_os = "ios", feature = "flutter"))]
 use std::iter::FromIterator;
 #[cfg(not(any(target_os = "ios")))]
@@ -294,10 +293,12 @@ impl<T: InvokeUiCM> ConnectionManager<T> {
                 session_id,
                 participant_id.clone(),
                 MonitoringDirection::Incoming,
-                Some(json!({
-                    "participant_id": participant_id,
-                    "is_control_active": client.keyboard,
-                })),
+                Some(monitoring_event::participant_control_meta(
+                    &participant_id,
+                    display_name,
+                    None,
+                    client.keyboard,
+                )),
             );
         }
         self.ui_handler.add_connection(&client);

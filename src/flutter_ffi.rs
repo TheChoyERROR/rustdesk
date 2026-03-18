@@ -9,6 +9,7 @@ use crate::{
         self, session_add, session_add_existed, session_start_, sessions, try_sync_peer_option,
     },
     input::*,
+    monitoring_event::{self, MonitoringDirection},
     ui_interface::{self, *},
 };
 use flutter_rust_bridge::{StreamSink, SyncReturn};
@@ -1149,6 +1150,10 @@ pub fn main_set_env(key: String, value: Option<String>) -> SyncReturn<()> {
 pub fn main_set_local_option(key: String, value: String) {
     let is_texture_render_key = key.eq(config::keys::OPTION_TEXTURE_RENDER);
     let is_d3d_render_key = key.eq(config::keys::OPTION_ALLOW_D3D_RENDER);
+    let is_monitoring_profile_key = matches!(
+        key.as_str(),
+        "monitoring-display-name" | "monitoring-avatar-url" | "monitoring-avatar-path"
+    );
     set_local_option(key, value.clone());
     if is_texture_render_key {
         let session_event = [("v", &value)];
@@ -1161,6 +1166,35 @@ pub fn main_set_local_option(key: String, value: String) {
     if is_d3d_render_key {
         for session in sessions::get_sessions() {
             session.update_supported_decodings();
+        }
+    }
+    if is_monitoring_profile_key {
+        let user_id = monitoring_event::local_user_id();
+        let participant_meta = monitoring_event::local_participant_meta(&user_id);
+        for session in sessions::get_sessions() {
+            if !session.is_default() {
+                continue;
+            }
+            let session_id = session.lc.read().unwrap().get_id().to_owned();
+            if session_id.trim().is_empty() {
+                continue;
+            }
+            let control_enabled = *session.server_keyboard_enabled.read().unwrap();
+            monitoring_event::emit_participant_joined(
+                session_id.clone(),
+                user_id.clone(),
+                MonitoringDirection::Outgoing,
+                Some(participant_meta.clone()),
+            );
+            monitoring_event::emit_control_changed(
+                session_id,
+                user_id.clone(),
+                MonitoringDirection::Outgoing,
+                Some(monitoring_event::local_control_meta(
+                    &user_id,
+                    control_enabled,
+                )),
+            );
         }
     }
 }
