@@ -1,24 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_hbb/common.dart';
 import 'package:flutter_hbb/desktop/pages/desktop_setting_page.dart';
 import 'package:flutter_hbb/models/helpdesk_model.dart';
 import 'package:provider/provider.dart';
 
-class HelpdeskPanel extends StatefulWidget {
+class HelpdeskPanel extends StatelessWidget {
   const HelpdeskPanel({super.key});
-
-  @override
-  State<HelpdeskPanel> createState() => _HelpdeskPanelState();
-}
-
-class _HelpdeskPanelState extends State<HelpdeskPanel> {
-  final TextEditingController _summaryController = TextEditingController();
-
-  @override
-  void dispose() {
-    _summaryController.dispose();
-    super.dispose();
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -56,7 +42,7 @@ class _HelpdeskPanelState extends State<HelpdeskPanel> {
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          'Uses your RustDesk ID and monitoring profile. RustDesk account login is optional.',
+                          'This desktop app works as the agent console. Tickets are created from the monitoring dashboard with the target RustDesk ID.',
                           style: Theme.of(context)
                               .textTheme
                               .bodySmall
@@ -144,6 +130,16 @@ class _HelpdeskPanelState extends State<HelpdeskPanel> {
                   ],
                 ],
               ),
+              const SizedBox(height: 10),
+              SwitchListTile.adaptive(
+                value: model.autoConnectEnabled,
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Auto-connect assigned tickets'),
+                subtitle: const Text(
+                  'When the dashboard dispatches a RustDesk ID to this agent, the app accepts the ticket and opens the remote connection automatically.',
+                ),
+                onChanged: (value) => model.setAutoConnectEnabled(value),
+              ),
               if (model.lastError?.trim().isNotEmpty ?? false) ...[
                 const SizedBox(height: 10),
                 Text(
@@ -170,6 +166,7 @@ class _HelpdeskPanelState extends State<HelpdeskPanel> {
                       ),
                       const SizedBox(height: 8),
                       Text('Ticket: ${assignment.ticket.ticketId}'),
+                      Text('Target RustDesk ID: ${assignment.ticket.clientId}'),
                       Text('Client: ${assignment.ticket.clientLabel}'),
                       Text('Status: ${_statusLabel(assignment.ticket.status)}'),
                       if ((assignment.ticket.summary ?? '').trim().isNotEmpty)
@@ -183,14 +180,7 @@ class _HelpdeskPanelState extends State<HelpdeskPanel> {
                             ElevatedButton(
                               onPressed: model.startingAssignment
                                   ? null
-                                  : () async {
-                                      final started =
-                                          await model.startAssignment();
-                                      if (started && mounted) {
-                                        connect(context,
-                                            assignment.ticket.clientId);
-                                      }
-                                    },
+                                  : () => model.acceptAndConnect(),
                               child: Text(
                                 model.startingAssignment
                                     ? 'Starting...'
@@ -199,10 +189,7 @@ class _HelpdeskPanelState extends State<HelpdeskPanel> {
                             ),
                           if (!model.canAcceptAssignment)
                             OutlinedButton(
-                              onPressed: () => connect(
-                                context,
-                                assignment.ticket.clientId,
-                              ),
+                              onPressed: () => model.acceptAndConnect(),
                               child: const Text('Connect'),
                             ),
                           if (model.canResolveAssignment)
@@ -223,51 +210,20 @@ class _HelpdeskPanelState extends State<HelpdeskPanel> {
                 ),
               ],
               const SizedBox(height: 18),
-              Text(
-                'Request support',
-                style: Theme.of(context).textTheme.titleSmall,
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: _summaryController,
-                minLines: 1,
-                maxLines: 2,
-                decoration: const InputDecoration(
-                  labelText: 'Ticket summary',
-                  hintText: 'Example: Need access to accounting workstation',
-                  border: OutlineInputBorder(),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.surface.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(12),
                 ),
-              ),
-              const SizedBox(height: 10),
-              Row(
-                children: [
-                  ElevatedButton(
-                    onPressed: model.creatingTicket
-                        ? null
-                        : () async {
-                            final created = await model.createTicket(
-                              summary: _summaryController.text,
-                            );
-                            if (created && mounted) {
-                              _summaryController.clear();
-                            }
-                          },
-                    child: Text(
-                      model.creatingTicket ? 'Creating...' : 'Create ticket',
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      model.lastTicketMessage ??
-                          'Agents marked as Available will be eligible to receive queued tickets.',
-                      style: Theme.of(context)
-                          .textTheme
-                          .bodySmall
-                          ?.copyWith(color: Colors.grey[700]),
-                    ),
-                  ),
-                ],
+                child: Text(
+                  'Create tickets from the web dashboard using the target machine RustDesk ID. Agents set to Available will receive the dispatch here and, if auto-connect is enabled, the remote session will open automatically.',
+                  style: Theme.of(context)
+                      .textTheme
+                      .bodySmall
+                      ?.copyWith(color: Colors.grey[700]),
+                ),
               ),
             ],
           ),

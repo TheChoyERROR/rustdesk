@@ -3,12 +3,14 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:get/get.dart';
 import 'package:flutter_hbb/common.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:flutter_hbb/utils/http_service.dart' as http_service;
 import 'package:flutter_hbb/utils/monitoring_profile.dart';
 
 const String _kHelpdeskStatusOption = 'helpdesk-agent-status';
+const String _kHelpdeskAutoConnectOption = 'helpdesk-auto-connect';
 
 class HelpdeskAgentSnapshot {
   final String agentId;
@@ -131,6 +133,10 @@ class HelpdeskModel with ChangeNotifier {
   String _desiredStatus = _normalizeDesiredStatus(
     bind.mainGetLocalOption(key: _kHelpdeskStatusOption).toString(),
   );
+  bool _autoConnectEnabled = _boolOptionEnabled(
+    bind.mainGetLocalOption(key: _kHelpdeskAutoConnectOption).toString(),
+    defaultValue: true,
+  );
   String _agentId = '';
   String _cachedAvatarInput = '';
   String? _cachedAvatarPayload;
@@ -192,6 +198,7 @@ class HelpdeskModel with ChangeNotifier {
   bool get hasActiveAssignment => _assignment != null;
   bool get canAcceptAssignment => _assignment?.ticket.status == 'opening';
   bool get canResolveAssignment => _assignment?.ticket.status == 'in_progress';
+  bool get autoConnectEnabled => _autoConnectEnabled;
   String get profileDisplayName => monitoringDisplayName();
   String get backendBaseUrl => monitoringBaseUrl();
 
@@ -245,6 +252,23 @@ class HelpdeskModel with ChangeNotifier {
         key: _kHelpdeskStatusOption, value: normalized);
     notifyListeners();
     await refreshNow();
+  }
+
+  Future<void> setAutoConnectEnabled(bool enabled) async {
+    if (_autoConnectEnabled == enabled) {
+      return;
+    }
+
+    _autoConnectEnabled = enabled;
+    await bind.mainSetLocalOption(
+      key: _kHelpdeskAutoConnectOption,
+      value: enabled ? 'Y' : 'N',
+    );
+    notifyListeners();
+
+    if (enabled && canAcceptAssignment) {
+      unawaited(acceptAndConnect());
+    }
   }
 
   Future<bool> createTicket({required String summary}) async {
@@ -369,6 +393,38 @@ class HelpdeskModel with ChangeNotifier {
       _startingAssignment = false;
       notifyListeners();
     }
+  }
+
+  Future<bool> acceptAndConnect() async {
+    final assignment = _assignment;
+    if (assignment == null) {
+      return false;
+    }
+
+    final clientId = assignment.ticket.clientId.trim();
+    if (clientId.isEmpty) {
+      _lastError = 'Assigned ticket is missing the target RustDesk ID.';
+      notifyListeners();
+      return false;
+    }
+
+    if (canAcceptAssignment) {
+      final started = await startAssignment();
+      if (!started) {
+        return false;
+      }
+    }
+
+    final context = Get.context;
+    if (context == null) {
+      _lastError =
+          'Assignment accepted, but the app is not ready to open the remote connection yet.';
+      notifyListeners();
+      return false;
+    }
+
+    await connect(context, clientId);
+    return true;
   }
 
   Future<bool> resolveAssignment() async {
@@ -534,7 +590,13 @@ class HelpdeskModel with ChangeNotifier {
         final currentTicketId = _assignment!.ticket.ticketId;
         if (currentTicketId != previousTicketId &&
             _assignment!.ticket.status == 'opening') {
-          showToast('New helpdesk ticket assigned: $currentTicketId');
+          if (_autoConnectEnabled) {
+            showToast(
+                'New helpdesk ticket assigned: $currentTicketId. Starting remote connection...');
+            unawaited(acceptAndConnect());
+          } else {
+            showToast('New helpdesk ticket assigned: $currentTicketId');
+          }
         }
       } else {
         final hadAssignment = previousTicketId != null;
@@ -629,6 +691,20 @@ DateTime? _parseDateTime(dynamic value) {
     return null;
   }
   return DateTime.tryParse(text);
+}
+
+bool _boolOptionEnabled(String rawValue, {required bool defaultValue}) {
+  final normalized = rawValue.trim().toUpperCase();
+  if (normalized.isEmpty) {
+    return defaultValue;
+  }
+  if (normalized == 'Y' || normalized == 'TRUE' || normalized == '1') {
+    return true;
+  }
+  if (normalized == 'N' || normalized == 'FALSE' || normalized == '0') {
+    return false;
+  }
+  return defaultValue;
 }
 
 Map<String, dynamic> _decodeJsonBody(String rawBody) {
