@@ -146,6 +146,7 @@ void runMainApp(bool startService) async {
   await Future.wait([gFFI.abModel.loadCache(), gFFI.groupModel.loadCache()]);
   gFFI.userModel.refreshCurrentUser();
   runApp(App());
+  gFFI.helpdeskModel.initialize();
 
   bool? alwaysOnTop;
   if (isDesktop) {
@@ -186,6 +187,7 @@ void runMobileApp() async {
   await Future.wait([gFFI.abModel.loadCache(), gFFI.groupModel.loadCache()]);
   gFFI.userModel.refreshCurrentUser();
   runApp(App());
+  gFFI.helpdeskModel.initialize();
   await initUniLinks();
 }
 
@@ -495,6 +497,7 @@ class _AppState extends State<App> with WidgetsBindingObserver {
           ChangeNotifierProvider.value(value: gFFI.cursorModel),
           ChangeNotifierProvider.value(value: gFFI.canvasModel),
           ChangeNotifierProvider.value(value: gFFI.peerTabModel),
+          ChangeNotifierProvider.value(value: gFFI.helpdeskModel),
         ],
         child: GetMaterialApp(
           navigatorKey: globalKey,

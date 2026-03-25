@@ -1186,6 +1186,13 @@ pub fn main_set_local_option(key: String, value: String) {
                 MonitoringDirection::Outgoing,
                 Some(participant_meta.clone()),
             );
+            monitoring_event::emit_participant_activity_throttled(
+                session_id.clone(),
+                user_id.clone(),
+                MonitoringDirection::Outgoing,
+                "profile_updated",
+                0,
+            );
             monitoring_event::emit_control_changed(
                 session_id,
                 user_id.clone(),

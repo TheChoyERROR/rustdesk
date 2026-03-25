@@ -27,6 +27,7 @@ import 'package:url_launcher/url_launcher_string.dart';
 
 import '../../common/widgets/dialog.dart';
 import '../../common/widgets/login.dart';
+import '../../utils/monitoring_profile.dart';
 
 const double _kTabWidth = 200;
 const double _kTabHeight = 42;
@@ -2120,12 +2121,24 @@ class _AccountState extends State<_Account> {
           }
         }
 
+        final validationError = validateMonitoringAvatarInput(
+          avatarUrl.isNotEmpty ? avatarUrl : avatarLocalPath,
+        );
+        if (validationError != null) {
+          setState(() {
+            errorText = validationError;
+            isInProgress = false;
+          });
+          return;
+        }
+
         await bind.mainSetLocalOption(
             key: _kMonitoringDisplayNameOption, value: displayName);
         await bind.mainSetLocalOption(
             key: _kMonitoringAvatarUrlOption, value: avatarUrl);
         await bind.mainSetLocalOption(
             key: _kMonitoringAvatarPathOption, value: avatarLocalPath);
+        await gFFI.helpdeskModel.onMonitoringProfileChanged();
 
         if (mounted) {
           setState(() {
