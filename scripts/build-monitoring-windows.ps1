@@ -83,17 +83,17 @@ function Enable-PythonCompatAliases {
     $shimPythonLine = $null
     $shimPipLine = $null
     if (Test-CommandAvailable "python3") {
-        $pythonCmd = "python3"
-        $shimPythonLine = "python3 %*"
-        $shimPipLine = "python3 -m pip %*"
+        $pythonCmd = (Get-Command "python3").Source
+        $shimPythonLine = "`"$pythonCmd`" %*"
+        $shimPipLine = "`"$pythonCmd`" -m pip %*"
     } elseif (Test-CommandAvailable "python") {
-        $pythonCmd = "python"
-        $shimPythonLine = "python %*"
-        $shimPipLine = "python -m pip %*"
+        $pythonCmd = (Get-Command "python").Source
+        $shimPythonLine = "`"$pythonCmd`" %*"
+        $shimPipLine = "`"$pythonCmd`" -m pip %*"
     } elseif (Test-CommandAvailable "py") {
-        $pythonCmd = "py -3"
-        $shimPythonLine = "py -3 %*"
-        $shimPipLine = "py -3 -m pip %*"
+        $pythonCmd = (Get-Command "py").Source
+        $shimPythonLine = "`"$pythonCmd`" -3 %*"
+        $shimPipLine = "`"$pythonCmd`" -3 -m pip %*"
     } else {
         throw "Python is required (python3, py, or python)."
     }
@@ -152,8 +152,8 @@ if ($SkipPortablePack) {
 }
 
 Write-Info "Building installer..."
-if ($pythonCmd -eq "py -3") {
-    py -3 @buildArgs
+if ((Split-Path $pythonCmd -Leaf) -ieq "py.exe" -or (Split-Path $pythonCmd -Leaf) -ieq "py") {
+    & $pythonCmd -3 @buildArgs
 } else {
     & $pythonCmd @buildArgs
 }
