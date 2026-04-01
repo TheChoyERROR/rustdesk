@@ -5,3 +5,5 @@
 *.yaml text eol=lf
 *.yml text eol=lf
 *.lock text eol=lf
+src/bridge_generated.rs text eol=lf
+src/bridge_generated.io.rs text eol=lf
