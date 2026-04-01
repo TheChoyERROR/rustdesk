@@ -86,14 +86,14 @@ function Enable-PythonCompatAliases {
         $pythonCmd = "python3"
         $shimPythonLine = "python3 %*"
         $shimPipLine = "python3 -m pip %*"
-    } elseif (Test-CommandAvailable "py") {
-        $pythonCmd = "py -3"
-        $shimPythonLine = "py -3 %*"
-        $shimPipLine = "py -3 -m pip %*"
     } elseif (Test-CommandAvailable "python") {
         $pythonCmd = "python"
         $shimPythonLine = "python %*"
         $shimPipLine = "python -m pip %*"
+    } elseif (Test-CommandAvailable "py") {
+        $pythonCmd = "py -3"
+        $shimPythonLine = "py -3 %*"
+        $shimPipLine = "py -3 -m pip %*"
     } else {
         throw "Python is required (python3, py, or python)."
     }
