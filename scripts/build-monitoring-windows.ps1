@@ -114,6 +114,13 @@ function Import-VsDevCmdEnvironment {
 }
 
 function Ensure-Tooling {
+    $preferredVcpkgRoot = $null
+    if (-not [string]::IsNullOrWhiteSpace($env:VCPKG_ROOT) -and (Test-Path $env:VCPKG_ROOT)) {
+        $preferredVcpkgRoot = $env:VCPKG_ROOT
+    } elseif (Test-Path "C:\\vcpkg") {
+        $preferredVcpkgRoot = "C:\\vcpkg"
+    }
+
     if (-not (Test-CommandAvailable "git")) {
         throw "git is required."
     }
@@ -127,6 +134,11 @@ function Ensure-Tooling {
     $hasLinker = Import-VsDevCmdEnvironment
     if (-not $hasLinker) {
         throw "link.exe was not found. Install Visual Studio Build Tools (Desktop development with C++) and re-run."
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($preferredVcpkgRoot)) {
+        $env:VCPKG_ROOT = $preferredVcpkgRoot
+        Write-Info "Using VCPKG_ROOT: $preferredVcpkgRoot"
     }
 }
 
