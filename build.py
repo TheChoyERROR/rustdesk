@@ -71,17 +71,17 @@ def detect_flutter_executable() -> str:
         return str(Path(env_bin).resolve())
 
     flutter_bin_name = 'flutter.bat' if windows else 'flutter'
+    repo_root = Path(__file__).resolve().parent.parent
+    for candidate_root in (repo_root / 'tools' / 'flutter-3.24.5', repo_root / 'tools' / 'flutter'):
+        candidate = candidate_root / 'bin' / flutter_bin_name
+        if candidate.exists():
+            return str(candidate.resolve())
+
     for env_root_key in ("RUSTDESK_FLUTTER_ROOT", "FLUTTER_ROOT"):
         env_root = os.environ.get(env_root_key)
         if not env_root:
             continue
         candidate = Path(env_root) / 'bin' / flutter_bin_name
-        if candidate.exists():
-            return str(candidate.resolve())
-
-    repo_root = Path(__file__).resolve().parent.parent
-    for candidate_root in (repo_root / 'tools' / 'flutter-3.24.5', repo_root / 'tools' / 'flutter'):
-        candidate = candidate_root / 'bin' / flutter_bin_name
         if candidate.exists():
             return str(candidate.resolve())
 
@@ -101,6 +101,24 @@ def detect_git_command_dir() -> str | None:
     ):
         if (candidate / 'git.exe').exists():
             return str(candidate.resolve())
+
+    return None
+
+
+def detect_flutter_rust_bridge_codegen() -> str | None:
+    env_path = os.environ.get("RUSTDESK_FLUTTER_RUST_BRIDGE_CODEGEN")
+    if env_path and Path(env_path).exists():
+        return quote_cmd_arg(str(Path(env_path).resolve()))
+
+    executable_name = 'flutter_rust_bridge_codegen.exe' if windows else 'flutter_rust_bridge_codegen'
+    codegen_on_path = shutil_lib.which(executable_name)
+    if codegen_on_path:
+        return quote_cmd_arg(str(Path(codegen_on_path).resolve()))
+
+    cargo_home = Path(os.environ.get('CARGO_HOME') or (Path.home() / '.cargo'))
+    candidate = cargo_home / 'bin' / executable_name
+    if candidate.exists():
+        return quote_cmd_arg(str(candidate.resolve()))
 
     return None
 
@@ -151,6 +169,39 @@ def configure_flutter_environment() -> str:
 
 def flutter_cmd(args: str) -> str:
     return f"{quote_cmd_arg(configure_flutter_environment())} {args}"
+
+
+def ensure_generated_bridge() -> None:
+    generated_bridge = Path('flutter/lib/generated_bridge.dart')
+    should_regenerate = os.environ.get('RUSTDESK_REGENERATE_FLUTTER_BRIDGE') == '1'
+    if generated_bridge.exists() and not should_regenerate:
+        return
+
+    codegen = detect_flutter_rust_bridge_codegen()
+    if codegen is None:
+        system2('cargo install flutter_rust_bridge_codegen --version 1.80.1 --features uuid')
+        codegen = detect_flutter_rust_bridge_codegen()
+        if codegen is None:
+            raise RuntimeError('flutter_rust_bridge_codegen is required but could not be found after installation.')
+
+    original_rust_log = os.environ.get('RUST_LOG')
+    if original_rust_log not in ('debug', 'info'):
+        os.environ['RUST_LOG'] = 'info'
+
+    try:
+        current_dir = os.getcwd()
+        os.chdir('flutter')
+        system2(flutter_cmd('pub get'))
+        os.chdir(current_dir)
+
+        system2(
+            f'{codegen} --rust-input ./src/flutter_ffi.rs --dart-output ./flutter/lib/generated_bridge.dart'
+        )
+    finally:
+        if original_rust_log is None:
+            os.environ.pop('RUST_LOG', None)
+        else:
+            os.environ['RUST_LOG'] = original_rust_log
 
 
 def get_version():
@@ -540,6 +591,7 @@ def build_flutter_arch_manjaro(version, features):
 
 
 def build_flutter_windows(version, features, skip_portable_pack):
+    ensure_generated_bridge()
     if not skip_cargo:
         system2(f'cargo build --features {features} --lib --release')
         if not os.path.exists("target/release/librustdesk.dll"):

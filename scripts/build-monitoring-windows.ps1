@@ -25,6 +25,37 @@ function Get-RepoRoot {
     return (Resolve-Path (Join-Path $scriptDir "..")).Path
 }
 
+function Use-VendoredFlutter {
+    param([string]$RepoRoot)
+
+    $workspaceRoot = Split-Path -Parent $RepoRoot
+    foreach ($candidateRoot in @(
+        (Join-Path $workspaceRoot "tools\\flutter-3.24.5"),
+        (Join-Path $workspaceRoot "tools\\flutter")
+    )) {
+        $flutterBat = Join-Path $candidateRoot "bin\\flutter.bat"
+        if (-not (Test-Path $flutterBat)) {
+            continue
+        }
+
+        $flutterBin = Join-Path $candidateRoot "bin"
+        $mingitCmd = Join-Path $flutterBin "mingit\\cmd"
+
+        $env:RUSTDESK_FLUTTER_ROOT = $candidateRoot
+        $env:FLUTTER_ROOT = $candidateRoot
+        if (-not ($env:PATH -split ";" | Where-Object { $_ -eq $flutterBin })) {
+            $env:PATH = "$flutterBin;$env:PATH"
+        }
+        if ((Test-Path (Join-Path $mingitCmd "git.exe")) -and -not ($env:PATH -split ";" | Where-Object { $_ -eq $mingitCmd })) {
+            $env:PATH = "$mingitCmd;$env:PATH"
+        }
+
+        return $candidateRoot
+    }
+
+    return $null
+}
+
 function Test-CommandAvailable {
     param([string]$Name)
     return $null -ne (Get-Command $Name -ErrorAction SilentlyContinue)
@@ -162,6 +193,10 @@ $repoRoot = Get-RepoRoot
 Set-Location $repoRoot
 
 Write-Info "Repo root: $repoRoot"
+$vendoredFlutterRoot = Use-VendoredFlutter -RepoRoot $repoRoot
+if ($vendoredFlutterRoot) {
+    Write-Info "Using vendored Flutter: $vendoredFlutterRoot"
+}
 Ensure-Tooling
 $pythonCmd = Enable-PythonCompatAliases
 
@@ -185,6 +220,9 @@ if ((Split-Path $pythonCmd -Leaf) -ieq "py.exe" -or (Split-Path $pythonCmd -Leaf
     & $pythonCmd -3 @buildArgs
 } else {
     & $pythonCmd @buildArgs
+}
+if ($LASTEXITCODE -ne 0) {
+    throw "build.py failed with exit code $LASTEXITCODE."
 }
 
 $installer = Get-ChildItem -Path $repoRoot -Filter "rustdesk-*-install.exe" -File -ErrorAction SilentlyContinue |
