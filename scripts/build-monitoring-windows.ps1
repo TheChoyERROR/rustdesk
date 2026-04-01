@@ -30,6 +30,31 @@ function Test-CommandAvailable {
     return $null -ne (Get-Command $Name -ErrorAction SilentlyContinue)
 }
 
+function Get-UsableCommandPath {
+    param([string[]]$Names)
+
+    foreach ($name in $Names) {
+        $commands = @(Get-Command $name -All -ErrorAction SilentlyContinue)
+        foreach ($command in $commands) {
+            if ($null -eq $command -or [string]::IsNullOrWhiteSpace($command.Source)) {
+                continue
+            }
+
+            if ($command.Source -like "*\\WindowsApps\\*") {
+                continue
+            }
+
+            return $command.Source
+        }
+
+        if ($commands.Count -gt 0 -and -not [string]::IsNullOrWhiteSpace($commands[0].Source)) {
+            return $commands[0].Source
+        }
+    }
+
+    return $null
+}
+
 function Import-VsDevCmdEnvironment {
     if (Test-CommandAvailable "link.exe") {
         return $true
@@ -82,23 +107,27 @@ function Enable-PythonCompatAliases {
     $pythonCmd = $null
     $shimPythonLine = $null
     $shimPipLine = $null
-    if (Test-CommandAvailable "python3") {
-        $pythonCmd = (Get-Command "python3").Source
+    $python3Path = Get-UsableCommandPath @("python3")
+    $pythonPath = Get-UsableCommandPath @("python")
+    $pyPath = Get-UsableCommandPath @("py")
+
+    if ($python3Path) {
+        $pythonCmd = $python3Path
         $shimPythonLine = "`"$pythonCmd`" %*"
         $shimPipLine = "`"$pythonCmd`" -m pip %*"
-    } elseif (Test-CommandAvailable "python") {
-        $pythonCmd = (Get-Command "python").Source
+    } elseif ($pythonPath) {
+        $pythonCmd = $pythonPath
         $shimPythonLine = "`"$pythonCmd`" %*"
         $shimPipLine = "`"$pythonCmd`" -m pip %*"
-    } elseif (Test-CommandAvailable "py") {
-        $pythonCmd = (Get-Command "py").Source
+    } elseif ($pyPath) {
+        $pythonCmd = $pyPath
         $shimPythonLine = "`"$pythonCmd`" -3 %*"
         $shimPipLine = "`"$pythonCmd`" -3 -m pip %*"
     } else {
         throw "Python is required (python3, py, or python)."
     }
 
-    if ((Test-CommandAvailable "python3") -and (Test-CommandAvailable "pip3")) {
+    if ($python3Path -and (Get-UsableCommandPath @("pip3"))) {
         return $pythonCmd
     }
 
