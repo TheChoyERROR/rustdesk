@@ -77,10 +77,6 @@ function Get-UsableCommandPath {
 
             return $command.Source
         }
-
-        if ($commands.Count -gt 0 -and -not [string]::IsNullOrWhiteSpace($commands[0].Source)) {
-            return $commands[0].Source
-        }
     }
 
     return $null
