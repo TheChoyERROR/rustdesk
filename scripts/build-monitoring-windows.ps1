@@ -134,22 +134,22 @@ function Enable-PythonCompatAliases {
     $pythonCmd = $null
     $shimPythonLine = $null
     $shimPipLine = $null
-    $python3Path = Get-UsableCommandPath @("python3")
-    $pythonPath = Get-UsableCommandPath @("python")
     $pyPath = Get-UsableCommandPath @("py")
+    $pythonPath = Get-UsableCommandPath @("python")
+    $python3Path = Get-UsableCommandPath @("python3")
 
-    if ($python3Path) {
-        $pythonCmd = $python3Path
-        $shimPythonLine = "`"$pythonCmd`" %*"
-        $shimPipLine = "`"$pythonCmd`" -m pip %*"
+    if ($pyPath) {
+        $pythonCmd = $pyPath
+        $shimPythonLine = "`"$pythonCmd`" -3 %*"
+        $shimPipLine = "`"$pythonCmd`" -3 -m pip %*"
     } elseif ($pythonPath) {
         $pythonCmd = $pythonPath
         $shimPythonLine = "`"$pythonCmd`" %*"
         $shimPipLine = "`"$pythonCmd`" -m pip %*"
-    } elseif ($pyPath) {
-        $pythonCmd = $pyPath
-        $shimPythonLine = "`"$pythonCmd`" -3 %*"
-        $shimPipLine = "`"$pythonCmd`" -3 -m pip %*"
+    } elseif ($python3Path) {
+        $pythonCmd = $python3Path
+        $shimPythonLine = "`"$pythonCmd`" %*"
+        $shimPipLine = "`"$pythonCmd`" -m pip %*"
     } else {
         throw "Python is required (python3, py, or python)."
     }
