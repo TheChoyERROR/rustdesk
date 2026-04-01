@@ -55,6 +55,16 @@ def quote_cmd_arg(value: str) -> str:
     return value
 
 
+def current_python_cmd() -> str:
+    executable = sys.executable or 'python3'
+    return quote_cmd_arg(executable)
+
+
+def python_module_cmd(module: str, args: str = '') -> str:
+    suffix = f' {args}' if args else ''
+    return f"{current_python_cmd()} -m {module}{suffix}"
+
+
 def detect_flutter_executable() -> str:
     env_bin = os.environ.get("RUSTDESK_FLUTTER_BIN")
     if env_bin and Path(env_bin).exists():
@@ -543,9 +553,9 @@ def build_flutter_windows(version, features, skip_portable_pack):
     if skip_portable_pack:
         return
     os.chdir('libs/portable')
-    system2('pip3 install -r requirements.txt')
+    system2(python_module_cmd('pip', 'install -r requirements.txt'))
     system2(
-        f'python3 ./generate.py -f ../../{flutter_build_dir_2} -o . -e ../../{flutter_build_dir_2}/rustdesk.exe')
+        f'{current_python_cmd()} ./generate.py -f ../../{flutter_build_dir_2} -o . -e ../../{flutter_build_dir_2}/rustdesk.exe')
     os.chdir('../..')
     if os.path.exists('./rustdesk_portable.exe'):
         os.replace('./target/release/rustdesk-portable-packer.exe',
@@ -573,7 +583,7 @@ def main():
     features = ','.join(get_features(args))
     flutter = args.flutter
     if not flutter:
-        system2('python3 res/inline-sciter.py')
+        system2(f'{current_python_cmd()} res/inline-sciter.py')
     else:
         print(f'Using Flutter executable: {configure_flutter_environment()}')
     print(args.skip_cargo)
@@ -609,9 +619,9 @@ def main():
         system2(
             f'cp -rf target/release/RustDesk.exe {res_dir}')
         os.chdir('libs/portable')
-        system2('pip3 install -r requirements.txt')
+        system2(python_module_cmd('pip', 'install -r requirements.txt'))
         system2(
-            f'python3 ./generate.py -f ../../{res_dir} -o . -e ../../{res_dir}/rustdesk-{version}-win7-install.exe')
+            f'{current_python_cmd()} ./generate.py -f ../../{res_dir} -o . -e ../../{res_dir}/rustdesk-{version}-win7-install.exe')
         system2('mv ../../{res_dir}/rustdesk-{version}-win7-install.exe ../..')
     elif os.path.isfile('/usr/bin/pacman'):
         # pacman -S -needed base-devel
