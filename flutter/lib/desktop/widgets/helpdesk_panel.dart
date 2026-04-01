@@ -290,6 +290,7 @@ class _ClientHelpdeskPanelState extends State<_ClientHelpdeskPanel> {
   final _descriptionController = TextEditingController();
   final _estimatedController = TextEditingController(text: '30');
   String _difficulty = 'medium';
+  int _handledComposerNonce = 0;
 
   @override
   void dispose() {
@@ -324,10 +325,144 @@ class _ClientHelpdeskPanelState extends State<_ClientHelpdeskPanel> {
     });
   }
 
+  Future<void> _openQuickRequestDialog(HelpdeskModel model) async {
+    if (!mounted) {
+      return;
+    }
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Request help'),
+          content: SizedBox(
+            width: 520,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: _titleController,
+                    decoration: const InputDecoration(
+                      labelText: 'Title',
+                      hintText: 'Printer issue in accounting',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _descriptionController,
+                    minLines: 3,
+                    maxLines: 5,
+                    decoration: const InputDecoration(
+                      labelText: 'Description',
+                      hintText:
+                          'Describe what the user needs and any visible error or blocker.',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: DropdownButtonFormField<String>(
+                          value: _difficulty,
+                          decoration: const InputDecoration(
+                            labelText: 'Difficulty',
+                            border: OutlineInputBorder(),
+                          ),
+                          items: const [
+                            DropdownMenuItem(
+                              value: 'low',
+                              child: Text('Low'),
+                            ),
+                            DropdownMenuItem(
+                              value: 'medium',
+                              child: Text('Medium'),
+                            ),
+                            DropdownMenuItem(
+                              value: 'high',
+                              child: Text('High'),
+                            ),
+                          ],
+                          onChanged: (value) {
+                            if (value == null) {
+                              return;
+                            }
+                            setState(() {
+                              _difficulty = value;
+                            });
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: TextField(
+                          controller: _estimatedController,
+                          keyboardType: TextInputType.number,
+                          inputFormatters: [
+                            FilteringTextInputFormatter.digitsOnly,
+                          ],
+                          decoration: const InputDecoration(
+                            labelText: 'Estimated time (min)',
+                            border: OutlineInputBorder(),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: model.creatingTicket
+                  ? null
+                  : () async {
+                      await _submit(model);
+                      if (!mounted) {
+                        return;
+                      }
+                      if ((model.lastTicketMessage ?? '')
+                          .startsWith('Ticket ')) {
+                        Navigator.of(dialogContext).pop();
+                      }
+                    },
+              child:
+                  Text(model.creatingTicket ? 'Creating...' : 'Create ticket'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Consumer<HelpdeskModel>(
       builder: (context, model, child) {
+        final requestedAgentMode = model.isAgentModeRequested;
+        final authorizationKnown = model.isAgentAuthorizationKnown;
+        final requestedButUnauthorized = requestedAgentMode &&
+            authorizationKnown &&
+            !model.isAgentAuthorized;
+        final requestedPendingAuthorization =
+            requestedAgentMode && !authorizationKnown;
+
+        if (model.ticketComposerRequestNonce > _handledComposerNonce) {
+          _handledComposerNonce = model.ticketComposerRequestNonce;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) {
+              _openQuickRequestDialog(model);
+            }
+          });
+        }
+
         return Container(
           width: double.infinity,
           padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
@@ -374,7 +509,11 @@ class _ClientHelpdeskPanelState extends State<_ClientHelpdeskPanel> {
                 spacing: 18,
                 runSpacing: 8,
                 children: [
-                  const _InfoChip(label: 'Mode', value: 'Client'),
+                  _InfoChip(
+                    label: 'Mode',
+                    value:
+                        requestedAgentMode ? 'Client (restricted)' : 'Client',
+                  ),
                   _InfoChip(
                     label: 'Name',
                     value: model.profileDisplayName.trim().isEmpty
@@ -393,6 +532,28 @@ class _ClientHelpdeskPanelState extends State<_ClientHelpdeskPanel> {
                   ),
                 ],
               ),
+              if (requestedButUnauthorized ||
+                  requestedPendingAuthorization) ...[
+                const SizedBox(height: 12),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color:
+                        Theme.of(context).colorScheme.surface.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    requestedButUnauthorized
+                        ? 'This device requested helpdesk agent mode, but the dashboard has not authorized RustDesk ID ${model.agentId.isEmpty ? 'pending' : model.agentId} as an operator. It will stay in client mode.'
+                        : 'Validating whether this RustDesk ID is authorized as an operator. Until then, this device stays in client mode.',
+                    style: Theme.of(context)
+                        .textTheme
+                        .bodySmall
+                        ?.copyWith(color: Colors.grey[700]),
+                  ),
+                ),
+              ],
               const SizedBox(height: 16),
               TextField(
                 controller: _titleController,
@@ -470,6 +631,12 @@ class _ClientHelpdeskPanelState extends State<_ClientHelpdeskPanel> {
                 runSpacing: 12,
                 crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
+                  OutlinedButton(
+                    onPressed: model.creatingTicket
+                        ? null
+                        : () => _openQuickRequestDialog(model),
+                    child: const Text('Quick form'),
+                  ),
                   ElevatedButton(
                     onPressed:
                         model.creatingTicket ? null : () => _submit(model),
@@ -513,7 +680,7 @@ class _ClientHelpdeskPanelState extends State<_ClientHelpdeskPanel> {
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Text(
-                  'Keep "Helpdesk agent mode" disabled on customer computers. Agents are the only ones who should enable operator states such as Available, Away, or Offline.',
+                  'Customer computers should use this support request flow. Operator states such as Available, Away, or Offline only activate on devices that the dashboard explicitly authorizes as agents.',
                   style: Theme.of(context)
                       .textTheme
                       .bodySmall

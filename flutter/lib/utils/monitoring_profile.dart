@@ -13,6 +13,8 @@ const String kMonitoringAvatarUrlOption = 'monitoring-avatar-url';
 const String kMonitoringAvatarPathOption = 'monitoring-avatar-path';
 const String kMonitoringHelpdeskAgentModeOption =
     'monitoring-helpdesk-agent-mode';
+const String kMonitoringOpenHelpdeskRequestOption =
+    'monitoring-open-helpdesk-request';
 const int kMonitoringMaxLocalAvatarBytes = 2 * 1024 * 1024;
 
 Map<String, dynamic> _localUserInfo() {

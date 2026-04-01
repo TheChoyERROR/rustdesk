@@ -2080,7 +2080,7 @@ class _AccountState extends State<_Account> {
         _Button('Monitoring profile', openMonitoringProfileDialog),
         text(
           'Helpdesk role',
-          isAgentModeEnabled ? 'Agent console enabled' : 'Client support mode',
+          isAgentModeEnabled ? 'Agent mode requested' : 'Client support mode',
         ).marginOnly(left: 18, top: 12),
         if (displayName.isNotEmpty)
           text('Display Name', displayName).marginOnly(left: 18, top: 4),
@@ -2248,7 +2248,7 @@ class _AccountState extends State<_Account> {
                 contentPadding: EdgeInsets.zero,
                 title: const Text('Helpdesk agent mode'),
                 subtitle: const Text(
-                  'Enable this only on operator computers. Customer machines should keep it off and only create tickets.',
+                  'Use this only on operator computers. The switch alone is not enough: the dashboard must also authorize this RustDesk ID before operator controls become active.',
                 ),
                 onChanged: (value) {
                   setState(() {

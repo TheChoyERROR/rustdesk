@@ -129,15 +129,39 @@ class HelpdeskAssignmentSnapshot {
   }
 }
 
+class HelpdeskAgentAuthorizationSnapshot {
+  final String agentId;
+  final bool authorized;
+  final String? displayName;
+
+  const HelpdeskAgentAuthorizationSnapshot({
+    required this.agentId,
+    required this.authorized,
+    this.displayName,
+  });
+
+  factory HelpdeskAgentAuthorizationSnapshot.fromJson(
+      Map<String, dynamic> json) {
+    return HelpdeskAgentAuthorizationSnapshot(
+      agentId: (json['agent_id'] ?? '').toString(),
+      authorized: json['authorized'] == true,
+      displayName: _optionalTrimmedString(json['display_name']),
+    );
+  }
+}
+
 class HelpdeskModel with ChangeNotifier {
   final WeakReference<dynamic> parent;
 
   Timer? _presenceTimer;
   Timer? _assignmentTimer;
+  Timer? _authorizationTimer;
+  Timer? _composerRequestTimer;
   bool _initialized = false;
   bool _disposed = false;
   bool _syncingPresence = false;
   bool _syncingAssignment = false;
+  bool _syncingAuthorization = false;
   bool _creatingTicket = false;
   bool _startingAssignment = false;
   bool _resolvingAssignment = false;
@@ -157,6 +181,8 @@ class HelpdeskModel with ChangeNotifier {
   DateTime? _lastPresenceSyncAt;
   HelpdeskAgentSnapshot? _agent;
   HelpdeskAssignmentSnapshot? _assignment;
+  HelpdeskAgentAuthorizationSnapshot? _authorization;
+  int _ticketComposerRequestNonce = 0;
 
   HelpdeskModel(this.parent);
 
@@ -201,6 +227,7 @@ class HelpdeskModel with ChangeNotifier {
   String get agentId => _agentId;
   HelpdeskAgentSnapshot? get agent => _agent;
   HelpdeskAssignmentSnapshot? get assignment => _assignment;
+  HelpdeskAgentAuthorizationSnapshot? get authorization => _authorization;
   String? get lastError => _lastError;
   String? get lastTicketMessage => _lastTicketMessage;
   DateTime? get lastPresenceSyncAt => _lastPresenceSyncAt;
@@ -211,7 +238,11 @@ class HelpdeskModel with ChangeNotifier {
   bool get canAcceptAssignment => _assignment?.ticket.status == 'opening';
   bool get canResolveAssignment => _assignment?.ticket.status == 'in_progress';
   bool get autoConnectEnabled => _autoConnectEnabled;
-  bool get isAgentModeEnabled => monitoringHelpdeskAgentModeEnabled();
+  bool get isAgentModeRequested => monitoringHelpdeskAgentModeEnabled();
+  bool get isAgentAuthorized => _authorization?.authorized == true;
+  bool get isAgentModeEnabled => isAgentModeRequested && isAgentAuthorized;
+  bool get isAgentAuthorizationKnown => _authorization != null;
+  int get ticketComposerRequestNonce => _ticketComposerRequestNonce;
   String get profileDisplayName => monitoringDisplayName();
   String get backendBaseUrl => monitoringBaseUrl();
 
@@ -220,6 +251,10 @@ class HelpdeskModel with ChangeNotifier {
       return;
     }
     _initialized = true;
+    _authorizationTimer = periodic_immediate(
+      const Duration(seconds: 15),
+      () async => refreshAuthorization(),
+    );
     _presenceTimer = periodic_immediate(
       const Duration(seconds: 10),
       () async => syncPresence(),
@@ -228,17 +263,26 @@ class HelpdeskModel with ChangeNotifier {
       const Duration(seconds: 5),
       () async => refreshAssignment(),
     );
+    _composerRequestTimer = periodic_immediate(
+      const Duration(seconds: 1),
+      () async => _pollPendingTicketComposerRequest(),
+    );
   }
 
   void disposeModel() {
     _disposed = true;
+    _authorizationTimer?.cancel();
     _presenceTimer?.cancel();
     _assignmentTimer?.cancel();
+    _composerRequestTimer?.cancel();
+    _authorizationTimer = null;
     _presenceTimer = null;
     _assignmentTimer = null;
+    _composerRequestTimer = null;
   }
 
   Future<void> refreshNow() async {
+    await refreshAuthorization(force: true);
     await syncPresence(force: true);
     await refreshAssignment(force: true);
   }
@@ -247,16 +291,17 @@ class HelpdeskModel with ChangeNotifier {
     _cachedAvatarInput = '';
     _cachedAvatarPayload = null;
     _lastTicketMessage = null;
-    if (!isAgentModeEnabled) {
+    if (!isAgentModeRequested) {
       await _deactivateAgentMode();
     }
     await syncPresence(force: true);
     await refreshAssignment(force: true);
+    await refreshAuthorization(force: true);
   }
 
   Future<void> setAgentModeEnabled(bool enabled) async {
     final nextValue = enabled ? 'Y' : 'N';
-    final currentEnabled = isAgentModeEnabled;
+    final currentEnabled = isAgentModeRequested;
     if (currentEnabled == enabled) {
       await onMonitoringProfileChanged();
       return;
@@ -309,6 +354,70 @@ class HelpdeskModel with ChangeNotifier {
 
     if (enabled && canAcceptAssignment) {
       unawaited(acceptAndConnect());
+    }
+  }
+
+  Future<void> refreshAuthorization({bool force = false}) async {
+    if (_disposed || _syncingAuthorization) {
+      return;
+    }
+
+    final baseUrl = monitoringBaseUrl();
+    if (baseUrl.isEmpty) {
+      if (force) {
+        _authorization = null;
+        _lastError = 'Monitoring server URL is not configured.';
+        notifyListeners();
+      }
+      return;
+    }
+
+    _syncingAuthorization = true;
+    try {
+      final agentId = await _resolveAgentId();
+      if (agentId.isEmpty) {
+        throw Exception('RustDesk ID is not available yet.');
+      }
+
+      final response = await http_service.get(
+        Uri.parse(
+          '$baseUrl/api/v1/helpdesk/agents/${Uri.encodeComponent(agentId)}/authorization',
+        ),
+      );
+      final payload = _decodeJsonBody(response.body);
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw Exception(_responseMessage(payload, response.body));
+      }
+
+      final authorizationJson = payload['authorization'];
+      if (authorizationJson is! Map) {
+        throw Exception('Authorization response is missing.');
+      }
+
+      final nextAuthorization = HelpdeskAgentAuthorizationSnapshot.fromJson(
+        Map<String, dynamic>.from(authorizationJson),
+      );
+      final wasAuthorized = _authorization?.authorized == true;
+      _authorization = nextAuthorization;
+
+      if (isAgentModeRequested && !nextAuthorization.authorized) {
+        if (wasAuthorized || _agent != null || _assignment != null) {
+          await _deactivateAgentMode(notifyBackend: false);
+        }
+        _lastError =
+            'This RustDesk ID is not authorized as a helpdesk agent in the dashboard.';
+      } else if (nextAuthorization.authorized &&
+          _lastError ==
+              'This RustDesk ID is not authorized as a helpdesk agent in the dashboard.') {
+        _lastError = null;
+      }
+    } catch (error) {
+      if (force) {
+        _lastError = 'Failed to verify helpdesk authorization: $error';
+      }
+    } finally {
+      _syncingAuthorization = false;
+      notifyListeners();
     }
   }
 
@@ -406,6 +515,26 @@ class HelpdeskModel with ChangeNotifier {
       _creatingTicket = false;
       notifyListeners();
     }
+  }
+
+  Future<void> _pollPendingTicketComposerRequest() async {
+    if (_disposed) {
+      return;
+    }
+
+    final requested = bind.mainGetLocalOption(
+      key: kMonitoringOpenHelpdeskRequestOption,
+    );
+    if (requested.trim().toUpperCase() != 'Y') {
+      return;
+    }
+
+    await bind.mainSetLocalOption(
+      key: kMonitoringOpenHelpdeskRequestOption,
+      value: 'N',
+    );
+    _ticketComposerRequestNonce += 1;
+    notifyListeners();
   }
 
   Future<bool> startAssignment() async {
@@ -558,9 +687,13 @@ class HelpdeskModel with ChangeNotifier {
       return;
     }
 
+    if (isAgentModeRequested && !isAgentAuthorized) {
+      await refreshAuthorization(force: force);
+    }
+
     if (!isAgentModeEnabled) {
       if (force) {
-        await _deactivateAgentMode();
+        await _deactivateAgentMode(notifyBackend: isAgentAuthorized);
       }
       return;
     }
@@ -625,6 +758,10 @@ class HelpdeskModel with ChangeNotifier {
   Future<void> refreshAssignment({bool force = false}) async {
     if (_disposed || _syncingAssignment) {
       return;
+    }
+
+    if (isAgentModeRequested && !isAgentAuthorized) {
+      await refreshAuthorization(force: force);
     }
 
     if (!isAgentModeEnabled) {
@@ -751,12 +888,17 @@ class HelpdeskModel with ChangeNotifier {
     }
   }
 
-  Future<void> _deactivateAgentMode() async {
+  Future<void> _deactivateAgentMode({bool notifyBackend = true}) async {
     _assignment = null;
 
     final previousAgent = _agent;
     _agent = null;
     _lastPresenceSyncAt = null;
+
+    if (!notifyBackend) {
+      notifyListeners();
+      return;
+    }
 
     final baseUrl = monitoringBaseUrl();
     if (baseUrl.isEmpty) {

@@ -168,7 +168,13 @@ fn make_tray() -> hbb_common::ResultType<()> {
                 if !crate::platform::uninstall_service(false, false) {
                     *control_flow = ControlFlow::Exit;
                 }
-            } else if event.id == open_i.id() || event.id == request_help_i.id() {
+            } else if event.id == open_i.id() {
+                open_func();
+            } else if event.id == request_help_i.id() {
+                crate::ui_interface::set_local_option(
+                    "monitoring-open-helpdesk-request".to_owned(),
+                    "Y".to_owned(),
+                );
                 open_func();
             }
         }
