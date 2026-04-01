@@ -11,6 +11,8 @@ const String kMonitoringServerLegacyOption = 'monitoring-server';
 const String kMonitoringDisplayNameOption = 'monitoring-display-name';
 const String kMonitoringAvatarUrlOption = 'monitoring-avatar-url';
 const String kMonitoringAvatarPathOption = 'monitoring-avatar-path';
+const String kMonitoringHelpdeskAgentModeOption =
+    'monitoring-helpdesk-agent-mode';
 const int kMonitoringMaxLocalAvatarBytes = 2 * 1024 * 1024;
 
 Map<String, dynamic> _localUserInfo() {
@@ -88,6 +90,18 @@ String monitoringBaseUrl() {
         baseUrl.substring(0, baseUrl.length - '/api/v1/session-events'.length);
   }
   return baseUrl.replaceFirst(RegExp(r'\/+$'), '');
+}
+
+bool monitoringHelpdeskAgentModeEnabled() {
+  final rawValue = _safeBindString(
+    bind.mainGetLocalOption(key: kMonitoringHelpdeskAgentModeOption),
+  );
+  if (rawValue.isEmpty) {
+    return false;
+  }
+
+  final normalized = rawValue.toUpperCase();
+  return normalized == 'Y' || normalized == 'TRUE' || normalized == '1';
 }
 
 String? validateMonitoringAvatarInput(String rawInput) {

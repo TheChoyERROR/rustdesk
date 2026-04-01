@@ -1,10 +1,27 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_hbb/desktop/pages/desktop_setting_page.dart';
 import 'package:flutter_hbb/models/helpdesk_model.dart';
 import 'package:provider/provider.dart';
 
 class HelpdeskPanel extends StatelessWidget {
   const HelpdeskPanel({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Consumer<HelpdeskModel>(
+      builder: (context, model, child) {
+        if (model.isAgentModeEnabled) {
+          return const _AgentHelpdeskPanel();
+        }
+        return const _ClientHelpdeskPanel();
+      },
+    );
+  }
+}
+
+class _AgentHelpdeskPanel extends StatelessWidget {
+  const _AgentHelpdeskPanel();
 
   @override
   Widget build(BuildContext context) {
@@ -37,12 +54,12 @@ class HelpdeskPanel extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Helpdesk',
+                          'Helpdesk agent console',
                           style: Theme.of(context).textTheme.titleMedium,
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          'This desktop app works as the agent console. Tickets are created from the monitoring dashboard with the target RustDesk ID.',
+                          'Use agent mode only on helpdesk operator machines. The dashboard dispatches tickets here using the target RustDesk ID.',
                           style: Theme.of(context)
                               .textTheme
                               .bodySmall
@@ -71,12 +88,17 @@ class HelpdeskPanel extends StatelessWidget {
                 runSpacing: 8,
                 children: [
                   _InfoChip(
-                      label: 'Agent',
-                      value: displayName.isEmpty ? 'Pending...' : displayName),
+                    label: 'Mode',
+                    value: 'Agent',
+                  ),
                   _InfoChip(
-                      label: 'ID',
-                      value:
-                          model.agentId.isEmpty ? 'Pending...' : model.agentId),
+                    label: 'Agent',
+                    value: displayName.isEmpty ? 'Pending...' : displayName,
+                  ),
+                  _InfoChip(
+                    label: 'ID',
+                    value: model.agentId.isEmpty ? 'Pending...' : model.agentId,
+                  ),
                   _InfoChip(
                     label: 'Server',
                     value: model.backendBaseUrl.isEmpty
@@ -104,10 +126,17 @@ class HelpdeskPanel extends StatelessWidget {
                       ),
                       items: const [
                         DropdownMenuItem(
-                            value: 'offline', child: Text('Offline')),
-                        DropdownMenuItem(value: 'away', child: Text('Away')),
+                          value: 'offline',
+                          child: Text('Offline'),
+                        ),
                         DropdownMenuItem(
-                            value: 'available', child: Text('Available')),
+                          value: 'away',
+                          child: Text('Away'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'available',
+                          child: Text('Available'),
+                        ),
                       ],
                       onChanged: (value) {
                         if (value != null) {
@@ -169,7 +198,23 @@ class HelpdeskPanel extends StatelessWidget {
                       Text('Target RustDesk ID: ${assignment.ticket.clientId}'),
                       Text('Client: ${assignment.ticket.clientLabel}'),
                       Text('Status: ${_statusLabel(assignment.ticket.status)}'),
-                      if ((assignment.ticket.summary ?? '').trim().isNotEmpty)
+                      if ((assignment.ticket.title ?? '').trim().isNotEmpty)
+                        Text('Title: ${assignment.ticket.title}'),
+                      if ((assignment.ticket.description ?? '')
+                          .trim()
+                          .isNotEmpty)
+                        Text('Description: ${assignment.ticket.description}'),
+                      if ((assignment.ticket.difficulty ?? '')
+                          .trim()
+                          .isNotEmpty)
+                        Text(
+                            'Difficulty: ${_difficultyLabel(assignment.ticket.difficulty)}'),
+                      if (assignment.ticket.estimatedMinutes != null)
+                        Text(
+                          'Estimated: ${assignment.ticket.estimatedMinutes} min',
+                        ),
+                      if ((assignment.ticket.summary ?? '').trim().isNotEmpty &&
+                          (assignment.ticket.title ?? '').trim().isEmpty)
                         Text('Summary: ${assignment.ticket.summary}'),
                       const SizedBox(height: 10),
                       Wrap(
@@ -218,7 +263,257 @@ class HelpdeskPanel extends StatelessWidget {
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Text(
-                  'Create tickets from the web dashboard using the target machine RustDesk ID. Agents set to Available will receive the dispatch here and, if auto-connect is enabled, the remote session will open automatically.',
+                  'Only operator machines should have agent mode enabled. Customer machines should keep it disabled and use the support request flow instead.',
+                  style: Theme.of(context)
+                      .textTheme
+                      .bodySmall
+                      ?.copyWith(color: Colors.grey[700]),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _ClientHelpdeskPanel extends StatefulWidget {
+  const _ClientHelpdeskPanel();
+
+  @override
+  State<_ClientHelpdeskPanel> createState() => _ClientHelpdeskPanelState();
+}
+
+class _ClientHelpdeskPanelState extends State<_ClientHelpdeskPanel> {
+  final _titleController = TextEditingController();
+  final _descriptionController = TextEditingController();
+  final _estimatedController = TextEditingController(text: '30');
+  String _difficulty = 'medium';
+
+  @override
+  void dispose() {
+    _titleController.dispose();
+    _descriptionController.dispose();
+    _estimatedController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit(HelpdeskModel model) async {
+    final estimatedMinutes =
+        int.tryParse(_estimatedController.text.trim()) ?? 0;
+    final created = await model.createTicket(
+      title: _titleController.text,
+      description: _descriptionController.text,
+      difficulty: _difficulty,
+      estimatedMinutes: estimatedMinutes,
+    );
+    if (!created) {
+      return;
+    }
+
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _titleController.clear();
+      _descriptionController.clear();
+      _estimatedController.text = '30';
+      _difficulty = 'medium';
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Consumer<HelpdeskModel>(
+      builder: (context, model, child) {
+        return Container(
+          width: double.infinity,
+          padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
+          decoration: BoxDecoration(
+            borderRadius: const BorderRadius.all(Radius.circular(13)),
+            border: Border.all(color: Theme.of(context).colorScheme.surface),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Request help',
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'This machine is configured as a customer endpoint. It can create helpdesk tickets without exposing agent controls.',
+                          style: Theme.of(context)
+                              .textTheme
+                              .bodySmall
+                              ?.copyWith(color: Colors.grey[700]),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  TextButton(
+                    onPressed: () => DesktopSettingPage.switch2page(
+                      SettingsTabKey.account,
+                    ),
+                    child: const Text('Profile'),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              Wrap(
+                spacing: 18,
+                runSpacing: 8,
+                children: [
+                  const _InfoChip(label: 'Mode', value: 'Client'),
+                  _InfoChip(
+                    label: 'Name',
+                    value: model.profileDisplayName.trim().isEmpty
+                        ? 'Pending...'
+                        : model.profileDisplayName.trim(),
+                  ),
+                  _InfoChip(
+                    label: 'ID',
+                    value: model.agentId.isEmpty ? 'Pending...' : model.agentId,
+                  ),
+                  _InfoChip(
+                    label: 'Server',
+                    value: model.backendBaseUrl.isEmpty
+                        ? 'Not configured'
+                        : model.backendBaseUrl,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: _titleController,
+                decoration: const InputDecoration(
+                  labelText: 'Title',
+                  hintText: 'Printer issue in accounting',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _descriptionController,
+                minLines: 3,
+                maxLines: 5,
+                decoration: const InputDecoration(
+                  labelText: 'Description',
+                  hintText:
+                      'Describe what the user needs and any visible error or blocker.',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: DropdownButtonFormField<String>(
+                      value: _difficulty,
+                      decoration: const InputDecoration(
+                        labelText: 'Difficulty',
+                        border: OutlineInputBorder(),
+                      ),
+                      items: const [
+                        DropdownMenuItem(
+                          value: 'low',
+                          child: Text('Low'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'medium',
+                          child: Text('Medium'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'high',
+                          child: Text('High'),
+                        ),
+                      ],
+                      onChanged: (value) {
+                        if (value == null) {
+                          return;
+                        }
+                        setState(() {
+                          _difficulty = value;
+                        });
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: TextField(
+                      controller: _estimatedController,
+                      keyboardType: TextInputType.number,
+                      inputFormatters: [
+                        FilteringTextInputFormatter.digitsOnly,
+                      ],
+                      decoration: const InputDecoration(
+                        labelText: 'Estimated time (min)',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              Wrap(
+                spacing: 12,
+                runSpacing: 12,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  ElevatedButton(
+                    onPressed:
+                        model.creatingTicket ? null : () => _submit(model),
+                    child: Text(
+                      model.creatingTicket ? 'Creating...' : 'Create ticket',
+                    ),
+                  ),
+                  Text(
+                    'The ticket will include this machine RustDesk ID automatically.',
+                    style: Theme.of(context)
+                        .textTheme
+                        .bodySmall
+                        ?.copyWith(color: Colors.grey[700]),
+                  ),
+                ],
+              ),
+              if (model.lastTicketMessage?.trim().isNotEmpty ?? false) ...[
+                const SizedBox(height: 12),
+                Text(
+                  model.lastTicketMessage!,
+                  style: TextStyle(
+                    color: (model.lastTicketMessage ?? '').startsWith('Failed')
+                        ? Colors.red[700]
+                        : Colors.green[700],
+                  ),
+                ),
+              ],
+              if (model.lastError?.trim().isNotEmpty ?? false) ...[
+                const SizedBox(height: 8),
+                Text(
+                  model.lastError!,
+                  style: TextStyle(color: Colors.red[700]),
+                ),
+              ],
+              const SizedBox(height: 16),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.surface.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  'Keep "Helpdesk agent mode" disabled on customer computers. Agents are the only ones who should enable operator states such as Available, Away, or Offline.',
                   style: Theme.of(context)
                       .textTheme
                       .bodySmall
@@ -285,5 +580,17 @@ String _statusLabel(String rawStatus) {
       return 'Cancelled';
     default:
       return 'Offline';
+  }
+}
+
+String _difficultyLabel(String? rawDifficulty) {
+  switch ((rawDifficulty ?? '').trim().toLowerCase()) {
+    case 'low':
+      return 'Low';
+    case 'high':
+      return 'High';
+    case 'medium':
+    default:
+      return 'Medium';
   }
 }

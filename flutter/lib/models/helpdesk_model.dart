@@ -50,6 +50,10 @@ class HelpdeskTicketSnapshot {
   final String? clientDisplayName;
   final String? deviceId;
   final String? requestedBy;
+  final String? title;
+  final String? description;
+  final String? difficulty;
+  final int? estimatedMinutes;
   final String? summary;
   final String status;
   final String? assignedAgentId;
@@ -63,6 +67,10 @@ class HelpdeskTicketSnapshot {
     this.clientDisplayName,
     this.deviceId,
     this.requestedBy,
+    this.title,
+    this.description,
+    this.difficulty,
+    this.estimatedMinutes,
     this.summary,
     required this.status,
     this.assignedAgentId,
@@ -78,6 +86,10 @@ class HelpdeskTicketSnapshot {
       clientDisplayName: _optionalTrimmedString(json['client_display_name']),
       deviceId: _optionalTrimmedString(json['device_id']),
       requestedBy: _optionalTrimmedString(json['requested_by']),
+      title: _optionalTrimmedString(json['title']),
+      description: _optionalTrimmedString(json['description']),
+      difficulty: _optionalTrimmedString(json['difficulty']),
+      estimatedMinutes: _parseInt(json['estimated_minutes']),
       summary: _optionalTrimmedString(json['summary']),
       status: (json['status'] ?? '').toString(),
       assignedAgentId: _optionalTrimmedString(json['assigned_agent_id']),
@@ -199,6 +211,7 @@ class HelpdeskModel with ChangeNotifier {
   bool get canAcceptAssignment => _assignment?.ticket.status == 'opening';
   bool get canResolveAssignment => _assignment?.ticket.status == 'in_progress';
   bool get autoConnectEnabled => _autoConnectEnabled;
+  bool get isAgentModeEnabled => monitoringHelpdeskAgentModeEnabled();
   String get profileDisplayName => monitoringDisplayName();
   String get backendBaseUrl => monitoringBaseUrl();
 
@@ -234,8 +247,36 @@ class HelpdeskModel with ChangeNotifier {
     _cachedAvatarInput = '';
     _cachedAvatarPayload = null;
     _lastTicketMessage = null;
+    if (!isAgentModeEnabled) {
+      await _deactivateAgentMode();
+    }
     await syncPresence(force: true);
     await refreshAssignment(force: true);
+  }
+
+  Future<void> setAgentModeEnabled(bool enabled) async {
+    final nextValue = enabled ? 'Y' : 'N';
+    final currentEnabled = isAgentModeEnabled;
+    if (currentEnabled == enabled) {
+      await onMonitoringProfileChanged();
+      return;
+    }
+
+    _lastError = null;
+    _lastTicketMessage = null;
+    await bind.mainSetLocalOption(
+      key: kMonitoringHelpdeskAgentModeOption,
+      value: nextValue,
+    );
+
+    if (!enabled) {
+      await _deactivateAgentMode();
+    } else {
+      _assignment = null;
+    }
+
+    notifyListeners();
+    await refreshNow();
   }
 
   Future<void> setDesiredStatus(String nextStatus) async {
@@ -271,7 +312,12 @@ class HelpdeskModel with ChangeNotifier {
     }
   }
 
-  Future<bool> createTicket({required String summary}) async {
+  Future<bool> createTicket({
+    required String title,
+    required String description,
+    required String difficulty,
+    required int estimatedMinutes,
+  }) async {
     if (_creatingTicket) {
       return false;
     }
@@ -283,10 +329,28 @@ class HelpdeskModel with ChangeNotifier {
       return false;
     }
 
-    final trimmedSummary = summary.trim();
-    if (trimmedSummary.isEmpty) {
+    final trimmedTitle = title.trim();
+    final trimmedDescription = description.trim();
+    final trimmedDifficulty = difficulty.trim();
+    if (trimmedTitle.isEmpty) {
+      _lastTicketMessage = 'Please enter a title before creating the ticket.';
+      notifyListeners();
+      return false;
+    }
+    if (trimmedDescription.isEmpty) {
       _lastTicketMessage =
-          'Please enter a short summary before creating the ticket.';
+          'Please describe the issue before creating the ticket.';
+      notifyListeners();
+      return false;
+    }
+    if (trimmedDifficulty.isEmpty) {
+      _lastTicketMessage =
+          'Please choose a difficulty level before creating the ticket.';
+      notifyListeners();
+      return false;
+    }
+    if (estimatedMinutes <= 0) {
+      _lastTicketMessage = 'Please enter an estimated time greater than zero.';
       notifyListeners();
       return false;
     }
@@ -311,7 +375,11 @@ class HelpdeskModel with ChangeNotifier {
           'client_display_name': displayName,
           'device_id': deviceId.isEmpty ? null : deviceId,
           'requested_by': displayName,
-          'summary': trimmedSummary,
+          'summary': trimmedTitle,
+          'title': trimmedTitle,
+          'description': trimmedDescription,
+          'difficulty': trimmedDifficulty,
+          'estimated_minutes': estimatedMinutes,
         }),
       );
 
@@ -341,7 +409,7 @@ class HelpdeskModel with ChangeNotifier {
   }
 
   Future<bool> startAssignment() async {
-    if (_startingAssignment || _assignment == null) {
+    if (!isAgentModeEnabled || _startingAssignment || _assignment == null) {
       return false;
     }
 
@@ -396,6 +464,9 @@ class HelpdeskModel with ChangeNotifier {
   }
 
   Future<bool> acceptAndConnect() async {
+    if (!isAgentModeEnabled) {
+      return false;
+    }
     final assignment = _assignment;
     if (assignment == null) {
       return false;
@@ -428,7 +499,7 @@ class HelpdeskModel with ChangeNotifier {
   }
 
   Future<bool> resolveAssignment() async {
-    if (_resolvingAssignment || _assignment == null) {
+    if (!isAgentModeEnabled || _resolvingAssignment || _assignment == null) {
       return false;
     }
 
@@ -484,6 +555,13 @@ class HelpdeskModel with ChangeNotifier {
 
   Future<void> syncPresence({bool force = false}) async {
     if (_disposed || _syncingPresence) {
+      return;
+    }
+
+    if (!isAgentModeEnabled) {
+      if (force) {
+        await _deactivateAgentMode();
+      }
       return;
     }
 
@@ -546,6 +624,14 @@ class HelpdeskModel with ChangeNotifier {
 
   Future<void> refreshAssignment({bool force = false}) async {
     if (_disposed || _syncingAssignment) {
+      return;
+    }
+
+    if (!isAgentModeEnabled) {
+      if (_assignment != null) {
+        _assignment = null;
+        notifyListeners();
+      }
       return;
     }
 
@@ -664,6 +750,81 @@ class HelpdeskModel with ChangeNotifier {
       return '';
     }
   }
+
+  Future<void> _deactivateAgentMode() async {
+    _assignment = null;
+
+    final previousAgent = _agent;
+    _agent = null;
+    _lastPresenceSyncAt = null;
+
+    final baseUrl = monitoringBaseUrl();
+    if (baseUrl.isEmpty) {
+      notifyListeners();
+      return;
+    }
+
+    try {
+      final agentId = await _resolveAgentId();
+      if (agentId.isEmpty) {
+        notifyListeners();
+        return;
+      }
+
+      final avatarUrl = await _resolveAvatarPayload();
+      final response = await http_service.post(
+        Uri.parse('$baseUrl/api/v1/helpdesk/agents/presence'),
+        body: jsonEncode({
+          'agent_id': agentId,
+          'display_name': _displayNameOrFallback(agentId),
+          'avatar_url': avatarUrl,
+          'status': 'offline',
+        }),
+      );
+      final payload = _decodeJsonBody(response.body);
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        final agentJson = payload['agent'];
+        if (agentJson is Map) {
+          final nextAgent = HelpdeskAgentSnapshot.fromJson(
+            Map<String, dynamic>.from(agentJson),
+          );
+          _agent = HelpdeskAgentSnapshot(
+            agentId: nextAgent.agentId,
+            displayName: nextAgent.displayName,
+            status: nextAgent.status,
+            avatarUrl: nextAgent.avatarUrl,
+            currentTicketId: null,
+            lastHeartbeatAt: nextAgent.lastHeartbeatAt,
+            updatedAt: nextAgent.updatedAt,
+          );
+        } else if (previousAgent != null) {
+          _agent = HelpdeskAgentSnapshot(
+            agentId: previousAgent.agentId,
+            displayName: previousAgent.displayName,
+            status: 'offline',
+            avatarUrl: previousAgent.avatarUrl,
+            currentTicketId: null,
+            lastHeartbeatAt: previousAgent.lastHeartbeatAt,
+            updatedAt: previousAgent.updatedAt,
+          );
+        }
+      }
+    } catch (_) {
+      if (previousAgent != null) {
+        _agent = HelpdeskAgentSnapshot(
+          agentId: previousAgent.agentId,
+          displayName: previousAgent.displayName,
+          status: 'offline',
+          avatarUrl: previousAgent.avatarUrl,
+          currentTicketId: null,
+          lastHeartbeatAt: previousAgent.lastHeartbeatAt,
+          updatedAt: previousAgent.updatedAt,
+        );
+      }
+    } finally {
+      notifyListeners();
+    }
+  }
 }
 
 String _normalizeDesiredStatus(String rawStatus) {
@@ -691,6 +852,17 @@ DateTime? _parseDateTime(dynamic value) {
     return null;
   }
   return DateTime.tryParse(text);
+}
+
+int? _parseInt(dynamic value) {
+  if (value is int) {
+    return value;
+  }
+  final text = _optionalTrimmedString(value);
+  if (text == null) {
+    return null;
+  }
+  return int.tryParse(text);
 }
 
 bool _boolOptionEnabled(String rawValue, {required bool defaultValue}) {

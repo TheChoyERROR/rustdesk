@@ -56,7 +56,10 @@ fn make_tray() -> hbb_common::ResultType<()> {
     let tray_menu = Menu::new();
     let quit_i = MenuItem::new(translate("Stop service".to_owned()), true, None);
     let open_i = MenuItem::new(translate("Open".to_owned()), true, None);
-    tray_menu.append_items(&[&open_i, &quit_i]).ok();
+    let request_help_i = MenuItem::new(translate("Request help".to_owned()), true, None);
+    tray_menu
+        .append_items(&[&request_help_i, &open_i, &quit_i])
+        .ok();
     let tooltip = |count: usize| {
         if count == 0 {
             format!(
@@ -165,7 +168,7 @@ fn make_tray() -> hbb_common::ResultType<()> {
                 if !crate::platform::uninstall_service(false, false) {
                     *control_flow = ControlFlow::Exit;
                 }
-            } else if event.id == open_i.id() {
+            } else if event.id == open_i.id() || event.id == request_help_i.id() {
                 open_func();
             }
         }

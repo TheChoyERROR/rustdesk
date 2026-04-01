@@ -2072,13 +2072,18 @@ class _AccountState extends State<_Account> {
 
     final displayName = _monitoringDisplayName();
     final avatarInput = _monitoringAvatarInput();
+    final isAgentModeEnabled = monitoringHelpdeskAgentModeEnabled();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _Button('Monitoring profile', openMonitoringProfileDialog),
+        text(
+          'Helpdesk role',
+          isAgentModeEnabled ? 'Agent console enabled' : 'Client support mode',
+        ).marginOnly(left: 18, top: 12),
         if (displayName.isNotEmpty)
-          text('Display Name', displayName).marginOnly(left: 18, top: 12),
+          text('Display Name', displayName).marginOnly(left: 18, top: 4),
         if (avatarInput.isNotEmpty)
           text('Avatar URL', avatarInput).marginOnly(left: 18, top: 4),
       ],
@@ -2090,6 +2095,8 @@ class _AccountState extends State<_Account> {
         TextEditingController(text: _monitoringDisplayName());
     final avatarController =
         TextEditingController(text: _monitoringAvatarInput());
+    final initialAgentModeEnabled = monitoringHelpdeskAgentModeEnabled();
+    var isAgentModeEnabled = monitoringHelpdeskAgentModeEnabled();
     var errorText = '';
     var isInProgress = false;
 
@@ -2138,7 +2145,11 @@ class _AccountState extends State<_Account> {
             key: _kMonitoringAvatarUrlOption, value: avatarUrl);
         await bind.mainSetLocalOption(
             key: _kMonitoringAvatarPathOption, value: avatarLocalPath);
-        await gFFI.helpdeskModel.onMonitoringProfileChanged();
+        if (initialAgentModeEnabled != isAgentModeEnabled) {
+          await gFFI.helpdeskModel.setAgentModeEnabled(isAgentModeEnabled);
+        } else {
+          await gFFI.helpdeskModel.onMonitoringProfileChanged();
+        }
 
         if (mounted) {
           setState(() {
@@ -2231,6 +2242,19 @@ class _AccountState extends State<_Account> {
                     ),
                   ),
                 ],
+              ),
+              SwitchListTile.adaptive(
+                value: isAgentModeEnabled,
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Helpdesk agent mode'),
+                subtitle: const Text(
+                  'Enable this only on operator computers. Customer machines should keep it off and only create tickets.',
+                ),
+                onChanged: (value) {
+                  setState(() {
+                    isAgentModeEnabled = value;
+                  });
+                },
               ),
             ],
           ),
