@@ -25,6 +25,7 @@ const double _kTabBarHeight = kDesktopRemoteTabBarHeight;
 const double _kIconSize = 18;
 const double _kDividerIndent = 10;
 const double _kActionIconSize = 12;
+const String _kCloseToTrayNoticeShownOption = 'close-to-tray-notice-shown';
 
 class TabInfo {
   final String key; // Notice: cm use client_id.toString() as key
@@ -464,10 +465,44 @@ class _DesktopTabState extends State<DesktopTab>
       });
     }
 
+    Future<void> showCloseToTrayNoticeIfNeeded() async {
+      if (!isWindows) {
+        return;
+      }
+      if (bind.mainGetLocalOption(key: _kCloseToTrayNoticeShownOption) == 'Y') {
+        return;
+      }
+
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) {
+          return AlertDialog(
+            title: const Text('App running in background'),
+            content: const Text(
+              'When you close this window, the app will stay running in the Windows system tray. Use the tray icon to request help or open the app again.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                child: const Text('OK'),
+              ),
+            ],
+          );
+        },
+      );
+
+      await bind.mainSetLocalOption(
+        key: _kCloseToTrayNoticeShownOption,
+        value: 'Y',
+      );
+    }
+
     await _saveFrame(flush: true);
 
     // hide window on close
     if (isMainWindow) {
+      await showCloseToTrayNoticeIfNeeded();
       if (rustDeskWinManager.getActiveWindows().contains(kMainWindowId)) {
         await rustDeskWinManager.unregisterActiveWindow(kMainWindowId);
       }

@@ -2370,7 +2370,12 @@ pub fn main_account_auth_result() -> String {
 pub fn main_on_main_window_close() {
     // may called more than one times
     #[cfg(windows)]
-    crate::portable_service::client::drop_portable_service_shared_memory();
+    {
+        crate::portable_service::client::drop_portable_service_shared_memory();
+        if !crate::check_process("--tray", true) {
+            let _ = crate::run_me(vec!["--tray"]);
+        }
+    }
 }
 
 pub fn main_current_is_wayland() -> SyncReturn<bool> {
