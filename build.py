@@ -9,6 +9,7 @@ import shutil
 import hashlib
 import argparse
 import sys
+import shutil as shutil_lib
 from pathlib import Path
 
 windows = platform.platform().startswith('Windows')
@@ -24,6 +25,7 @@ else:
     flutter_build_dir = 'build/linux/x64/release/bundle/'
 flutter_build_dir_2 = f'flutter/{flutter_build_dir}'
 skip_cargo = False
+_flutter_executable = None
 
 
 def get_deb_arch() -> str:
@@ -43,6 +45,102 @@ def system2(cmd):
     if exit_code != 0:
         sys.stderr.write(f"Error occurred when executing: `{cmd}`. Exiting.\n")
         sys.exit(-1)
+
+
+def quote_cmd_arg(value: str) -> str:
+    if not value:
+        return value
+    if any(ch.isspace() for ch in value):
+        return f'"{value}"'
+    return value
+
+
+def detect_flutter_executable() -> str:
+    env_bin = os.environ.get("RUSTDESK_FLUTTER_BIN")
+    if env_bin and Path(env_bin).exists():
+        return str(Path(env_bin).resolve())
+
+    flutter_bin_name = 'flutter.bat' if windows else 'flutter'
+    for env_root_key in ("RUSTDESK_FLUTTER_ROOT", "FLUTTER_ROOT"):
+        env_root = os.environ.get(env_root_key)
+        if not env_root:
+            continue
+        candidate = Path(env_root) / 'bin' / flutter_bin_name
+        if candidate.exists():
+            return str(candidate.resolve())
+
+    repo_root = Path(__file__).resolve().parent.parent
+    for candidate_root in (repo_root / 'tools' / 'flutter-3.24.5', repo_root / 'tools' / 'flutter'):
+        candidate = candidate_root / 'bin' / flutter_bin_name
+        if candidate.exists():
+            return str(candidate.resolve())
+
+    return 'flutter'
+
+
+def detect_git_command_dir() -> str | None:
+    git_on_path = shutil_lib.which('git')
+    if git_on_path:
+        return str(Path(git_on_path).resolve().parent)
+
+    repo_root = Path(__file__).resolve().parent.parent
+    for candidate in (
+        repo_root / 'tools' / 'flutter-3.24.5' / 'bin' / 'mingit' / 'cmd',
+        repo_root / 'tools' / 'flutter' / 'bin' / 'mingit' / 'cmd',
+        Path(r'C:\Program Files\Git\cmd'),
+    ):
+        if (candidate / 'git.exe').exists():
+            return str(candidate.resolve())
+
+    return None
+
+
+def add_git_safe_directory(path: str | None) -> None:
+    if not path:
+        return
+    normalized_path = path.replace('\\', '/')
+    try:
+        current_count = int(os.environ.get('GIT_CONFIG_COUNT', '0') or '0')
+    except ValueError:
+        current_count = 0
+
+    for idx in range(current_count):
+        if (
+            os.environ.get(f'GIT_CONFIG_KEY_{idx}') == 'safe.directory'
+            and os.environ.get(f'GIT_CONFIG_VALUE_{idx}') == normalized_path
+        ):
+            return
+
+    os.environ[f'GIT_CONFIG_KEY_{current_count}'] = 'safe.directory'
+    os.environ[f'GIT_CONFIG_VALUE_{current_count}'] = normalized_path
+    os.environ['GIT_CONFIG_COUNT'] = str(current_count + 1)
+
+
+def configure_flutter_environment() -> str:
+    global _flutter_executable
+    if _flutter_executable is None:
+        _flutter_executable = detect_flutter_executable()
+        if _flutter_executable != 'flutter':
+            flutter_root = str(Path(_flutter_executable).resolve().parent.parent)
+            flutter_bin = str(Path(_flutter_executable).resolve().parent)
+            os.environ.setdefault('RUSTDESK_FLUTTER_ROOT', flutter_root)
+            os.environ['FLUTTER_ROOT'] = flutter_root
+            path_entries = os.environ.get('PATH', '').split(os.pathsep)
+            if flutter_bin not in path_entries:
+                os.environ['PATH'] = flutter_bin + (
+                    os.pathsep + os.environ['PATH'] if os.environ.get('PATH') else '')
+            add_git_safe_directory(flutter_root)
+        git_cmd_dir = detect_git_command_dir()
+        if git_cmd_dir:
+            path_entries = os.environ.get('PATH', '').split(os.pathsep)
+            if git_cmd_dir not in path_entries:
+                os.environ['PATH'] = git_cmd_dir + (
+                    os.pathsep + os.environ['PATH'] if os.environ.get('PATH') else '')
+    return _flutter_executable
+
+
+def flutter_cmd(args: str) -> str:
+    return f"{quote_cmd_arg(configure_flutter_environment())} {args}"
 
 
 def get_version():
@@ -320,7 +418,7 @@ def build_flutter_deb(version, features):
         system2(f'cargo build --features {features} --lib --release')
         ffi_bindgen_function_refactor()
     os.chdir('flutter')
-    system2('flutter build linux --release')
+    system2(flutter_cmd('build linux --release'))
     system2('mkdir -p tmpdeb/usr/bin/')
     system2('mkdir -p tmpdeb/usr/share/rustdesk')
     system2('mkdir -p tmpdeb/etc/rustdesk/')
@@ -410,7 +508,7 @@ def build_flutter_dmg(version, features):
     system2(
         "cp target/release/liblibrustdesk.dylib target/release/librustdesk.dylib")
     os.chdir('flutter')
-    system2('flutter build macos --release')
+    system2(flutter_cmd('build macos --release'))
     system2('cp -rf ../target/release/service ./build/macos/Build/Products/Release/RustDesk.app/Contents/MacOS/')
     '''
     system2(
@@ -425,7 +523,7 @@ def build_flutter_arch_manjaro(version, features):
         system2(f'cargo build --features {features} --lib --release')
     ffi_bindgen_function_refactor()
     os.chdir('flutter')
-    system2('flutter build linux --release')
+    system2(flutter_cmd('build linux --release'))
     system2(f'strip {flutter_build_dir}/lib/librustdesk.so')
     os.chdir('../res')
     system2('HBB=`pwd`/.. FLUTTER=1 makepkg -f')
@@ -438,7 +536,7 @@ def build_flutter_windows(version, features, skip_portable_pack):
             print("cargo build failed, please check rust source code.")
             exit(-1)
     os.chdir('flutter')
-    system2('flutter build windows --release')
+    system2(flutter_cmd('build windows --release'))
     os.chdir('..')
     shutil.copy2('target/release/deps/dylib_virtual_display.dll',
                  flutter_build_dir_2)
@@ -476,6 +574,8 @@ def main():
     flutter = args.flutter
     if not flutter:
         system2('python3 res/inline-sciter.py')
+    else:
+        print(f'Using Flutter executable: {configure_flutter_environment()}')
     print(args.skip_cargo)
     if args.skip_cargo:
         skip_cargo = True
