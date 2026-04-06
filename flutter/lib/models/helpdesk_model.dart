@@ -11,6 +11,9 @@ import 'package:flutter_hbb/utils/monitoring_profile.dart';
 
 const String _kHelpdeskStatusOption = 'helpdesk-agent-status';
 const String _kHelpdeskAutoConnectOption = 'helpdesk-auto-connect';
+const String _kHelpdeskPolicyAcceptedVersionOption =
+    'monitoring-helpdesk-policy-accepted-version';
+const String _kHelpdeskPolicyVersion = '2026-04-attended-support-v1';
 
 class HelpdeskAgentSnapshot {
   final String agentId;
@@ -245,6 +248,9 @@ class HelpdeskModel with ChangeNotifier {
   int get ticketComposerRequestNonce => _ticketComposerRequestNonce;
   String get profileDisplayName => monitoringDisplayName();
   String get backendBaseUrl => monitoringBaseUrl();
+  bool get clientSupportPolicyAccepted =>
+      bind.mainGetLocalOption(key: _kHelpdeskPolicyAcceptedVersionOption) ==
+      _kHelpdeskPolicyVersion;
 
   void initialize() {
     if (_initialized || _disposed) {
@@ -506,7 +512,7 @@ class HelpdeskModel with ChangeNotifier {
         Map<String, dynamic>.from(ticketJson),
       );
       _lastTicketMessage =
-          'Ticket ${ticket.ticketId} created for ${ticket.clientLabel}.';
+          'Ticket ${ticket.ticketId} created for ${ticket.clientLabel}. Keep RustDesk running in the background. When the assigned helpdesk agent connects, approve the support prompt on this computer.';
       return true;
     } catch (error) {
       _lastTicketMessage = 'Failed to create ticket: $error';
@@ -535,6 +541,29 @@ class HelpdeskModel with ChangeNotifier {
     );
     _ticketComposerRequestNonce += 1;
     notifyListeners();
+  }
+
+  Future<void> acknowledgeClientSupportPolicy() async {
+    await bind.mainSetLocalOption(
+      key: _kHelpdeskPolicyAcceptedVersionOption,
+      value: _kHelpdeskPolicyVersion,
+    );
+    notifyListeners();
+  }
+
+  Future<void> prepareClientAttendedSupport() async {
+    if (isAgentModeEnabled) {
+      return;
+    }
+
+    // Customer devices should rely on attended approval so agents never need
+    // to request a shared password manually.
+    await bind.mainSetOption(key: 'approve-mode', value: 'click');
+    await bind.mainSetOption(
+      key: 'verification-method',
+      value: 'use-temporary-password',
+    );
+    await bind.mainUpdateTemporaryPassword();
   }
 
   Future<bool> startAssignment() async {

@@ -300,7 +300,88 @@ class _ClientHelpdeskPanelState extends State<_ClientHelpdeskPanel> {
     super.dispose();
   }
 
+  Future<bool> _ensureClientSupportPolicyAccepted(HelpdeskModel model,
+      {bool forceShow = false}) async {
+    if (!mounted) {
+      return false;
+    }
+
+    if (!forceShow && model.clientSupportPolicyAccepted) {
+      return true;
+    }
+
+    final accepted = await showDialog<bool>(
+          context: context,
+          barrierDismissible: false,
+          builder: (dialogContext) {
+            return AlertDialog(
+              title: const Text('Support policy'),
+              content: const SizedBox(
+                width: 540,
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'By requesting helpdesk support, this computer will switch to attended support mode.',
+                      ),
+                      SizedBox(height: 12),
+                      Text(
+                        'What this means:',
+                        style: TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                      SizedBox(height: 8),
+                      Text(
+                        '1. The assigned helpdesk agent will connect using this machine RustDesk ID.',
+                      ),
+                      SizedBox(height: 6),
+                      Text(
+                        '2. You will see a confirmation prompt on this computer before the agent can control the session.',
+                      ),
+                      SizedBox(height: 6),
+                      Text(
+                        '3. You should only approve support requests from your organization helpdesk team.',
+                      ),
+                      SizedBox(height: 6),
+                      Text(
+                        '4. No permanent password needs to be shared manually with the agent.',
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(false),
+                  child: const Text('Cancel'),
+                ),
+                ElevatedButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(true),
+                  child: const Text('Accept and continue'),
+                ),
+              ],
+            );
+          },
+        ) ??
+        false;
+
+    if (!accepted) {
+      return false;
+    }
+
+    await model.acknowledgeClientSupportPolicy();
+    return true;
+  }
+
   Future<void> _submit(HelpdeskModel model) async {
+    final policyAccepted = await _ensureClientSupportPolicyAccepted(model);
+    if (!policyAccepted) {
+      return;
+    }
+
+    await model.prepareClientAttendedSupport();
+
     final estimatedMinutes =
         int.tryParse(_estimatedController.text.trim()) ?? 0;
     final created = await model.createTicket(
@@ -554,6 +635,56 @@ class _ClientHelpdeskPanelState extends State<_ClientHelpdeskPanel> {
                   ),
                 ),
               ],
+              const SizedBox(height: 16),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.surface.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Attended support policy',
+                      style: Theme.of(context).textTheme.titleSmall,
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Customer requests use attended approval. Once helpdesk is assigned from the dashboard, this computer will show a confirmation prompt before the session starts. The user should approve that prompt instead of sharing a password manually.',
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodySmall
+                          ?.copyWith(color: Colors.grey[700]),
+                    ),
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 12,
+                      runSpacing: 8,
+                      children: [
+                        _InfoChip(
+                          label: 'Access',
+                          value: 'Approve by click',
+                        ),
+                        _InfoChip(
+                          label: 'Policy',
+                          value: model.clientSupportPolicyAccepted
+                              ? 'Accepted'
+                              : 'Pending acceptance',
+                        ),
+                        OutlinedButton(
+                          onPressed: () => _ensureClientSupportPolicyAccepted(
+                            model,
+                            forceShow: true,
+                          ),
+                          child: const Text('Review policy'),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
               const SizedBox(height: 16),
               TextField(
                 controller: _titleController,
