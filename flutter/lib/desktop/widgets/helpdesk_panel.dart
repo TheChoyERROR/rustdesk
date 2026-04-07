@@ -245,16 +245,6 @@ class _AgentHelpdeskPanel extends StatelessWidget {
                     value: displayName.isEmpty ? 'Pending...' : displayName,
                   ),
                   _InfoChip(
-                    label: 'ID',
-                    value: model.agentId.isEmpty ? 'Pending...' : model.agentId,
-                  ),
-                  _InfoChip(
-                    label: 'Server',
-                    value: model.backendBaseUrl.isEmpty
-                        ? 'Not configured'
-                        : model.backendBaseUrl,
-                  ),
-                  _InfoChip(
                     label: 'Current',
                     value: _statusLabel(model.effectiveStatus),
                   ),
@@ -747,16 +737,6 @@ class _ClientHelpdeskPanelState extends State<_ClientHelpdeskPanel> {
                         ? 'Pending...'
                         : model.profileDisplayName.trim(),
                   ),
-                  _InfoChip(
-                    label: 'ID',
-                    value: model.agentId.isEmpty ? 'Pending...' : model.agentId,
-                  ),
-                  _InfoChip(
-                    label: 'Server',
-                    value: model.backendBaseUrl.isEmpty
-                        ? 'Not configured'
-                        : model.backendBaseUrl,
-                  ),
                 ],
               ),
               if (requestedButUnauthorized ||
@@ -772,8 +752,8 @@ class _ClientHelpdeskPanelState extends State<_ClientHelpdeskPanel> {
                   ),
                   child: Text(
                     requestedButUnauthorized
-                        ? 'This device requested helpdesk agent mode, but the dashboard has not authorized RustDesk ID ${model.agentId.isEmpty ? 'pending' : model.agentId} as an operator. It will stay in client mode.'
-                        : 'Validating whether this RustDesk ID is authorized as an operator. Until then, this device stays in client mode.',
+                        ? 'This device requested helpdesk agent mode, but the dashboard has not authorized it as an operator. It will stay in client mode.'
+                        : 'Validating whether this device is authorized as an operator. Until then, it stays in client mode.',
                     style: Theme.of(context)
                         .textTheme
                         .bodySmall

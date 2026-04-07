@@ -217,11 +217,13 @@ class _ConnectionPageState extends State<ConnectionPage>
 
   final _menuOpen = false.obs;
   late final Future<String> _appVersionFuture;
+  late final TabController _workspaceTabController;
 
   @override
   void initState() {
     super.initState();
     _appVersionFuture = bind.mainGetVersion();
+    _workspaceTabController = TabController(length: 2, vsync: this);
     _allPeersLoader.init(setState);
     _idFocusNode.addListener(onFocusChanged);
     if (_idController.text.isEmpty) {
@@ -242,6 +244,7 @@ class _ConnectionPageState extends State<ConnectionPage>
   @override
   void dispose() {
     _idController.dispose();
+    _workspaceTabController.dispose();
     windowManager.removeListener(this);
     _allPeersLoader.clear();
     _idFocusNode.removeListener(onFocusChanged);
@@ -309,10 +312,6 @@ class _ConnectionPageState extends State<ConnectionPage>
     final isOutgoingOnly = bind.isOutgoingOnly();
     return LayoutBuilder(
       builder: (context, constraints) {
-        final maxHelpdeskHeight = max(
-          280.0,
-          min(420.0, constraints.maxHeight * 0.42),
-        );
         return Column(
           children: [
             Expanded(
@@ -324,13 +323,50 @@ class _ConnectionPageState extends State<ConnectionPage>
                   ],
                 ).marginOnly(top: 22),
                 SizedBox(height: 12),
-                ConstrainedBox(
-                  constraints: BoxConstraints(maxHeight: maxHelpdeskHeight),
-                  child: const HelpdeskPanel(),
-                ).marginOnly(right: 12),
-                SizedBox(height: 12),
-                Divider().paddingOnly(right: 12),
-                Expanded(child: PeerTabPage()),
+                Expanded(
+                  child: Container(
+                    margin: const EdgeInsets.only(right: 12),
+                    padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+                    decoration: BoxDecoration(
+                      borderRadius: const BorderRadius.all(Radius.circular(13)),
+                      border: Border.all(
+                          color: Theme.of(context).colorScheme.surface),
+                    ),
+                    child: Column(
+                      children: [
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: TabBar(
+                            controller: _workspaceTabController,
+                            isScrollable: true,
+                            labelColor: Theme.of(context)
+                                .textTheme
+                                .titleMedium
+                                ?.color,
+                            unselectedLabelColor: Colors.grey[600],
+                            indicatorColor:
+                                Theme.of(context).colorScheme.primary,
+                            dividerColor: Colors.transparent,
+                            tabs: const [
+                              Tab(text: 'Recientes'),
+                              Tab(text: 'Helpdesk'),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        Expanded(
+                          child: TabBarView(
+                            controller: _workspaceTabController,
+                            children: const [
+                              PeerTabPage(),
+                              HelpdeskPanel(),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
               ],
             ).paddingOnly(left: 12.0)),
             if (!isOutgoingOnly) const Divider(height: 1),
