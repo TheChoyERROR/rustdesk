@@ -160,6 +160,7 @@ class HelpdeskModel with ChangeNotifier {
   Timer? _assignmentTimer;
   Timer? _authorizationTimer;
   Timer? _composerRequestTimer;
+  Timer? _clientApprovalTimer;
   bool _initialized = false;
   bool _disposed = false;
   bool _syncingPresence = false;
@@ -168,6 +169,8 @@ class HelpdeskModel with ChangeNotifier {
   bool _creatingTicket = false;
   bool _startingAssignment = false;
   bool _resolvingAssignment = false;
+  bool _updatingOperationalFields = false;
+  bool _waitingForClientApproval = false;
 
   String _desiredStatus = _normalizeDesiredStatus(
     bind.mainGetLocalOption(key: _kHelpdeskStatusOption).toString(),
@@ -237,10 +240,12 @@ class HelpdeskModel with ChangeNotifier {
   bool get creatingTicket => _creatingTicket;
   bool get startingAssignment => _startingAssignment;
   bool get resolvingAssignment => _resolvingAssignment;
+  bool get updatingOperationalFields => _updatingOperationalFields;
   bool get hasActiveAssignment => _assignment != null;
   bool get canAcceptAssignment => _assignment?.ticket.status == 'opening';
   bool get canResolveAssignment => _assignment?.ticket.status == 'in_progress';
   bool get autoConnectEnabled => _autoConnectEnabled;
+  bool get waitingForClientApproval => _waitingForClientApproval;
   bool get isAgentModeRequested => monitoringHelpdeskAgentModeEnabled();
   bool get isAgentAuthorized => _authorization?.authorized == true;
   bool get isAgentModeEnabled => isAgentModeRequested && isAgentAuthorized;
@@ -281,10 +286,12 @@ class HelpdeskModel with ChangeNotifier {
     _presenceTimer?.cancel();
     _assignmentTimer?.cancel();
     _composerRequestTimer?.cancel();
+    _clientApprovalTimer?.cancel();
     _authorizationTimer = null;
     _presenceTimer = null;
     _assignmentTimer = null;
     _composerRequestTimer = null;
+    _clientApprovalTimer = null;
   }
 
   Future<void> refreshNow() async {
@@ -300,6 +307,7 @@ class HelpdeskModel with ChangeNotifier {
     if (!isAgentModeRequested) {
       await _deactivateAgentMode();
     }
+    _clearWaitingForClientApproval(notify: false);
     await syncPresence(force: true);
     await refreshAssignment(force: true);
     await refreshAuthorization(force: true);
@@ -323,6 +331,16 @@ class HelpdeskModel with ChangeNotifier {
     if (!enabled) {
       await _deactivateAgentMode();
     } else {
+      final storedStatus = bind.mainGetLocalOption(key: _kHelpdeskStatusOption)
+          .toString()
+          .trim();
+      if (storedStatus.isEmpty || _normalizeDesiredStatus(storedStatus) == 'offline') {
+        _desiredStatus = 'available';
+        await bind.mainSetLocalOption(
+          key: _kHelpdeskStatusOption,
+          value: _desiredStatus,
+        );
+      }
       _assignment = null;
     }
 
@@ -430,8 +448,6 @@ class HelpdeskModel with ChangeNotifier {
   Future<bool> createTicket({
     required String title,
     required String description,
-    required String difficulty,
-    required int estimatedMinutes,
   }) async {
     if (_creatingTicket) {
       return false;
@@ -446,7 +462,6 @@ class HelpdeskModel with ChangeNotifier {
 
     final trimmedTitle = title.trim();
     final trimmedDescription = description.trim();
-    final trimmedDifficulty = difficulty.trim();
     if (trimmedTitle.isEmpty) {
       _lastTicketMessage = 'Please enter a title before creating the ticket.';
       notifyListeners();
@@ -455,17 +470,6 @@ class HelpdeskModel with ChangeNotifier {
     if (trimmedDescription.isEmpty) {
       _lastTicketMessage =
           'Please describe the issue before creating the ticket.';
-      notifyListeners();
-      return false;
-    }
-    if (trimmedDifficulty.isEmpty) {
-      _lastTicketMessage =
-          'Please choose a difficulty level before creating the ticket.';
-      notifyListeners();
-      return false;
-    }
-    if (estimatedMinutes <= 0) {
-      _lastTicketMessage = 'Please enter an estimated time greater than zero.';
       notifyListeners();
       return false;
     }
@@ -493,8 +497,6 @@ class HelpdeskModel with ChangeNotifier {
           'summary': trimmedTitle,
           'title': trimmedTitle,
           'description': trimmedDescription,
-          'difficulty': trimmedDifficulty,
-          'estimated_minutes': estimatedMinutes,
         }),
       );
 
@@ -519,6 +521,80 @@ class HelpdeskModel with ChangeNotifier {
       return false;
     } finally {
       _creatingTicket = false;
+      notifyListeners();
+    }
+  }
+
+  Future<bool> updateAssignmentOperationalFields({
+    required String difficulty,
+    required int estimatedMinutes,
+  }) async {
+    if (!isAgentModeEnabled ||
+        _updatingOperationalFields ||
+        _assignment == null) {
+      return false;
+    }
+
+    final ticket = _assignment!.ticket;
+    final baseUrl = monitoringBaseUrl();
+    if (baseUrl.isEmpty) {
+      _lastError = 'Monitoring server URL is not configured.';
+      notifyListeners();
+      return false;
+    }
+
+    final normalizedDifficulty = difficulty.trim().toLowerCase();
+    if (!const {'low', 'medium', 'high'}.contains(normalizedDifficulty)) {
+      _lastError = 'Please select a valid difficulty.';
+      notifyListeners();
+      return false;
+    }
+    if (estimatedMinutes <= 0) {
+      _lastError = 'Estimated time must be greater than 0 minutes.';
+      notifyListeners();
+      return false;
+    }
+
+    _updatingOperationalFields = true;
+    _lastError = null;
+    notifyListeners();
+
+    try {
+      final response = await http_service.post(
+        Uri.parse(
+          '$baseUrl/api/v1/helpdesk/tickets/${Uri.encodeComponent(ticket.ticketId)}/operational',
+        ),
+        body: jsonEncode({
+          'difficulty': normalizedDifficulty,
+          'estimated_minutes': estimatedMinutes,
+        }),
+      );
+
+      final payload = _decodeJsonBody(response.body);
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw Exception(_responseMessage(payload, response.body));
+      }
+
+      final ticketJson = payload['ticket'];
+      if (ticketJson is! Map) {
+        throw Exception('Operational update response is missing the ticket.');
+      }
+
+      final nextTicket = HelpdeskTicketSnapshot.fromJson(
+        Map<String, dynamic>.from(ticketJson),
+      );
+      final currentAgent = _agent ?? _assignment!.agent;
+      _assignment = HelpdeskAssignmentSnapshot(
+        ticket: nextTicket,
+        agent: currentAgent,
+      );
+      showToast('Ticket operational fields updated.');
+      return true;
+    } catch (error) {
+      _lastError = 'Failed to update ticket operational fields: $error';
+      return false;
+    } finally {
+      _updatingOperationalFields = false;
       notifyListeners();
     }
   }
@@ -611,6 +687,7 @@ class HelpdeskModel with ChangeNotifier {
       _assignment =
           HelpdeskAssignmentSnapshot(ticket: nextTicket, agent: nextAgent);
       _agent = nextAgent;
+      _clearWaitingForClientApproval(notify: false);
       return true;
     } catch (error) {
       _lastError = 'Failed to start assignment: $error';
@@ -653,6 +730,7 @@ class HelpdeskModel with ChangeNotifier {
     }
 
     await connect(context, clientId);
+    _setWaitingForClientApproval();
     return true;
   }
 
@@ -697,6 +775,7 @@ class HelpdeskModel with ChangeNotifier {
         );
       }
       _assignment = null;
+      _clearWaitingForClientApproval(notify: false);
 
       if (_desiredStatus == 'offline') {
         await syncPresence(force: true);
@@ -854,6 +933,7 @@ class HelpdeskModel with ChangeNotifier {
         final hadAssignment = previousTicketId != null;
         final previousAgent = _agent;
         _assignment = null;
+        _clearWaitingForClientApproval(notify: false);
         if (previousAgent != null) {
           _agent = HelpdeskAgentSnapshot(
             agentId: previousAgent.agentId,
@@ -919,6 +999,7 @@ class HelpdeskModel with ChangeNotifier {
 
   Future<void> _deactivateAgentMode({bool notifyBackend = true}) async {
     _assignment = null;
+    _clearWaitingForClientApproval(notify: false);
 
     final previousAgent = _agent;
     _agent = null;
@@ -993,6 +1074,27 @@ class HelpdeskModel with ChangeNotifier {
         );
       }
     } finally {
+      notifyListeners();
+    }
+  }
+
+  void _setWaitingForClientApproval() {
+    _clientApprovalTimer?.cancel();
+    _waitingForClientApproval = true;
+    _clientApprovalTimer = Timer(const Duration(seconds: 20), () {
+      _clearWaitingForClientApproval();
+    });
+    notifyListeners();
+  }
+
+  void _clearWaitingForClientApproval({bool notify = true}) {
+    _clientApprovalTimer?.cancel();
+    _clientApprovalTimer = null;
+    if (!_waitingForClientApproval) {
+      return;
+    }
+    _waitingForClientApproval = false;
+    if (notify) {
       notifyListeners();
     }
   }

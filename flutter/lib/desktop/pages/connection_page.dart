@@ -216,10 +216,12 @@ class _ConnectionPageState extends State<ConnectionPage>
   Iterable<Peer> _autocompleteOpts = [];
 
   final _menuOpen = false.obs;
+  late final Future<String> _appVersionFuture;
 
   @override
   void initState() {
     super.initState();
+    _appVersionFuture = bind.mainGetVersion();
     _allPeersLoader.init(setState);
     _idFocusNode.addListener(onFocusChanged);
     if (_idController.text.isEmpty) {
@@ -332,7 +334,29 @@ class _ConnectionPageState extends State<ConnectionPage>
               ],
             ).paddingOnly(left: 12.0)),
             if (!isOutgoingOnly) const Divider(height: 1),
-            if (!isOutgoingOnly) OnlineStatusWidget()
+            if (!isOutgoingOnly) OnlineStatusWidget(),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+              child: Align(
+                alignment: Alignment.centerRight,
+                child: FutureBuilder<String>(
+                  future: _appVersionFuture,
+                  builder: (context, snapshot) {
+                    final version = snapshot.data?.trim() ?? '';
+                    if (version.isEmpty) {
+                      return const SizedBox.shrink();
+                    }
+                    return Text(
+                      'Version $version',
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodySmall
+                          ?.copyWith(color: Colors.grey[600]),
+                    );
+                  },
+                ),
+              ),
+            ),
           ],
         );
       },

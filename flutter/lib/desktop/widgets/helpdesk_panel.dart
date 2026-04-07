@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_hbb/desktop/pages/desktop_setting_page.dart';
 import 'package:flutter_hbb/models/helpdesk_model.dart';
 import 'package:provider/provider.dart';
@@ -23,6 +22,150 @@ class HelpdeskPanel extends StatelessWidget {
 class _AgentHelpdeskPanel extends StatelessWidget {
   const _AgentHelpdeskPanel();
 
+  Future<void> _openOperationalFieldsDialog(
+    BuildContext context,
+    HelpdeskModel model,
+  ) async {
+    final assignment = model.assignment;
+    if (assignment == null) {
+      return;
+    }
+
+    final estimatedController = TextEditingController(
+      text: (assignment.ticket.estimatedMinutes ?? 30).toString(),
+    );
+    var selectedDifficulty =
+        (assignment.ticket.difficulty ?? 'medium').trim().toLowerCase();
+    var localError = '';
+
+    final updated = await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) {
+            return StatefulBuilder(
+              builder: (dialogContext, setState) {
+                return AlertDialog(
+                  title: const Text('Operational fields'),
+                  content: SizedBox(
+                    width: 420,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        DropdownButtonFormField<String>(
+                          value: selectedDifficulty,
+                          decoration: const InputDecoration(
+                            labelText: 'Difficulty',
+                            border: OutlineInputBorder(),
+                          ),
+                          items: const [
+                            DropdownMenuItem(
+                              value: 'low',
+                              child: Text('Low'),
+                            ),
+                            DropdownMenuItem(
+                              value: 'medium',
+                              child: Text('Medium'),
+                            ),
+                            DropdownMenuItem(
+                              value: 'high',
+                              child: Text('High'),
+                            ),
+                          ],
+                          onChanged: model.updatingOperationalFields
+                              ? null
+                              : (value) {
+                                  if (value == null) {
+                                    return;
+                                  }
+                                  setState(() {
+                                    selectedDifficulty = value;
+                                    localError = '';
+                                  });
+                                },
+                        ),
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: estimatedController,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: 'Estimated time (min)',
+                            border: OutlineInputBorder(),
+                          ),
+                        ),
+                        if (localError.trim().isNotEmpty) ...[
+                          const SizedBox(height: 10),
+                          Text(
+                            localError,
+                            style: TextStyle(color: Colors.red[700]),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: model.updatingOperationalFields
+                          ? null
+                          : () => Navigator.of(dialogContext).pop(false),
+                      child: const Text('Cancel'),
+                    ),
+                    ElevatedButton(
+                      onPressed: model.updatingOperationalFields
+                          ? null
+                          : () async {
+                              final estimatedMinutes = int.tryParse(
+                                estimatedController.text.trim(),
+                              );
+                              if (estimatedMinutes == null ||
+                                  estimatedMinutes <= 0) {
+                                setState(() {
+                                  localError =
+                                      'Estimated time must be a positive number.';
+                                });
+                                return;
+                              }
+                              final saved =
+                                  await model.updateAssignmentOperationalFields(
+                                difficulty: selectedDifficulty,
+                                estimatedMinutes: estimatedMinutes,
+                              );
+                              if (!dialogContext.mounted) {
+                                return;
+                              }
+                              if (saved) {
+                                Navigator.of(dialogContext).pop(true);
+                                return;
+                              }
+                              setState(() {
+                                localError = model.lastError ??
+                                    'Could not update ticket operational fields.';
+                              });
+                            },
+                      child: Text(
+                        model.updatingOperationalFields
+                            ? 'Saving...'
+                            : 'Save fields',
+                      ),
+                    ),
+                  ],
+                );
+              },
+            );
+          },
+        ) ??
+        false;
+
+    estimatedController.dispose();
+    if (!updated || !context.mounted) {
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Operational fields updated for the current ticket.'),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Consumer<HelpdeskModel>(
@@ -35,6 +178,10 @@ class _AgentHelpdeskPanel extends StatelessWidget {
             : agentDisplayName.isNotEmpty
                 ? agentDisplayName
                 : model.agentId;
+        final statusDropdownValue = model.hasActiveAssignment
+            ? model.effectiveStatus
+            : model.desiredStatus;
+        final statusSelectorLocked = model.hasActiveAssignment;
 
         return Container(
           width: double.infinity,
@@ -120,7 +267,7 @@ class _AgentHelpdeskPanel extends StatelessWidget {
                     constraints:
                         const BoxConstraints(minWidth: 180, maxWidth: 220),
                     child: DropdownButtonFormField<String>(
-                      value: model.desiredStatus,
+                      value: statusDropdownValue,
                       decoration: const InputDecoration(
                         labelText: 'Operator status',
                         isDense: true,
@@ -139,8 +286,16 @@ class _AgentHelpdeskPanel extends StatelessWidget {
                           value: 'available',
                           child: Text('Available'),
                         ),
+                        DropdownMenuItem(
+                          value: 'opening',
+                          child: Text('Opening (automatic)'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'busy',
+                          child: Text('Busy (automatic)'),
+                        ),
                       ],
-                      onChanged: (value) {
+                      onChanged: statusSelectorLocked ? null : (value) {
                         if (value != null) {
                           model.setDesiredStatus(value);
                         }
@@ -162,6 +317,37 @@ class _AgentHelpdeskPanel extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 10),
+              if (model.waitingForClientApproval) ...[
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color:
+                        Theme.of(context).colorScheme.surface.withOpacity(0.24),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Row(
+                    children: [
+                      const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2.2),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          'Waiting for the client to approve the support prompt on their computer.',
+                          style: Theme.of(context)
+                              .textTheme
+                              .bodySmall
+                              ?.copyWith(color: Colors.grey[700]),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 10),
+              ],
               SwitchListTile.adaptive(
                 value: model.autoConnectEnabled,
                 contentPadding: EdgeInsets.zero,
@@ -215,6 +401,20 @@ class _AgentHelpdeskPanel extends StatelessWidget {
                         Text(
                           'Estimated: ${assignment.ticket.estimatedMinutes} min',
                         ),
+                      const SizedBox(height: 8),
+                      OutlinedButton(
+                        onPressed: model.updatingOperationalFields
+                            ? null
+                            : () => _openOperationalFieldsDialog(
+                                  context,
+                                  model,
+                                ),
+                        child: Text(
+                          model.updatingOperationalFields
+                              ? 'Saving fields...'
+                              : 'Edit difficulty and estimate',
+                        ),
+                      ),
                       if ((assignment.ticket.summary ?? '').trim().isNotEmpty &&
                           (assignment.ticket.title ?? '').trim().isEmpty)
                         Text('Summary: ${assignment.ticket.summary}'),
@@ -291,15 +491,12 @@ class _ClientHelpdeskPanel extends StatefulWidget {
 class _ClientHelpdeskPanelState extends State<_ClientHelpdeskPanel> {
   final _titleController = TextEditingController();
   final _descriptionController = TextEditingController();
-  final _estimatedController = TextEditingController(text: '30');
-  String _difficulty = 'medium';
   int _handledComposerNonce = 0;
 
   @override
   void dispose() {
     _titleController.dispose();
     _descriptionController.dispose();
-    _estimatedController.dispose();
     super.dispose();
   }
 
@@ -385,13 +582,9 @@ class _ClientHelpdeskPanelState extends State<_ClientHelpdeskPanel> {
 
     await model.prepareClientAttendedSupport();
 
-    final estimatedMinutes =
-        int.tryParse(_estimatedController.text.trim()) ?? 0;
     final created = await model.createTicket(
       title: _titleController.text,
       description: _descriptionController.text,
-      difficulty: _difficulty,
-      estimatedMinutes: estimatedMinutes,
     );
     if (!created) {
       return;
@@ -404,8 +597,6 @@ class _ClientHelpdeskPanelState extends State<_ClientHelpdeskPanel> {
     setState(() {
       _titleController.clear();
       _descriptionController.clear();
-      _estimatedController.text = '30';
-      _difficulty = 'medium';
     });
   }
 
@@ -444,56 +635,6 @@ class _ClientHelpdeskPanelState extends State<_ClientHelpdeskPanel> {
                           'Describe what the user needs and any visible error or blocker.',
                       border: OutlineInputBorder(),
                     ),
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: DropdownButtonFormField<String>(
-                          value: _difficulty,
-                          decoration: const InputDecoration(
-                            labelText: 'Difficulty',
-                            border: OutlineInputBorder(),
-                          ),
-                          items: const [
-                            DropdownMenuItem(
-                              value: 'low',
-                              child: Text('Low'),
-                            ),
-                            DropdownMenuItem(
-                              value: 'medium',
-                              child: Text('Medium'),
-                            ),
-                            DropdownMenuItem(
-                              value: 'high',
-                              child: Text('High'),
-                            ),
-                          ],
-                          onChanged: (value) {
-                            if (value == null) {
-                              return;
-                            }
-                            setState(() {
-                              _difficulty = value;
-                            });
-                          },
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: TextField(
-                          controller: _estimatedController,
-                          keyboardType: TextInputType.number,
-                          inputFormatters: [
-                            FilteringTextInputFormatter.digitsOnly,
-                          ],
-                          decoration: const InputDecoration(
-                            labelText: 'Estimated time (min)',
-                            border: OutlineInputBorder(),
-                          ),
-                        ),
-                      ),
-                    ],
                   ),
                 ],
               ),
@@ -712,55 +853,6 @@ class _ClientHelpdeskPanelState extends State<_ClientHelpdeskPanel> {
                 ),
               ),
               const SizedBox(height: 12),
-              Row(
-                children: [
-                  Expanded(
-                    child: DropdownButtonFormField<String>(
-                      value: _difficulty,
-                      decoration: const InputDecoration(
-                        labelText: 'Difficulty',
-                        border: OutlineInputBorder(),
-                      ),
-                      items: const [
-                        DropdownMenuItem(
-                          value: 'low',
-                          child: Text('Low'),
-                        ),
-                        DropdownMenuItem(
-                          value: 'medium',
-                          child: Text('Medium'),
-                        ),
-                        DropdownMenuItem(
-                          value: 'high',
-                          child: Text('High'),
-                        ),
-                      ],
-                      onChanged: (value) {
-                        if (value == null) {
-                          return;
-                        }
-                        setState(() {
-                          _difficulty = value;
-                        });
-                      },
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: TextField(
-                      controller: _estimatedController,
-                      keyboardType: TextInputType.number,
-                      inputFormatters: [
-                        FilteringTextInputFormatter.digitsOnly,
-                      ],
-                      decoration: const InputDecoration(
-                        labelText: 'Estimated time (min)',
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
               const SizedBox(height: 14),
               Wrap(
                 spacing: 12,
@@ -788,6 +880,14 @@ class _ClientHelpdeskPanelState extends State<_ClientHelpdeskPanel> {
                         ?.copyWith(color: Colors.grey[700]),
                   ),
                 ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Difficulty and estimated time are now defined by the assigned operator or the supervisor after reviewing the request.',
+                style: Theme.of(context)
+                    .textTheme
+                    .bodySmall
+                    ?.copyWith(color: Colors.grey[700]),
               ),
               if (model.lastTicketMessage?.trim().isNotEmpty ?? false) ...[
                 const SizedBox(height: 12),
