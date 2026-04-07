@@ -484,15 +484,34 @@ class _AgentHelpdeskPanel extends StatelessWidget {
                           .trim()
                           .isNotEmpty)
                         Text('Description: ${assignment.ticket.description}'),
-                      if ((assignment.ticket.difficulty ?? '')
-                          .trim()
-                          .isNotEmpty)
-                        Text(
-                            'Difficulty: ${_difficultyLabel(assignment.ticket.difficulty)}'),
-                      if (assignment.ticket.estimatedMinutes != null)
-                        Text(
-                          'Estimated: ${assignment.ticket.estimatedMinutes} min',
+                      const SizedBox(height: 10),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Theme.of(context)
+                              .colorScheme
+                              .surface
+                              .withOpacity(0.22),
+                          borderRadius: BorderRadius.circular(10),
                         ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Operational fields',
+                              style: Theme.of(context).textTheme.labelLarge,
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              'Difficulty: ${(assignment.ticket.difficulty ?? '').trim().isNotEmpty ? _difficultyLabel(assignment.ticket.difficulty) : 'Pending definition'}',
+                            ),
+                            Text(
+                              'Estimated: ${assignment.ticket.estimatedMinutes != null ? '${assignment.ticket.estimatedMinutes} min' : 'Pending definition'}',
+                            ),
+                          ],
+                        ),
+                      ),
                       const SizedBox(height: 8),
                       OutlinedButton(
                         onPressed: model.updatingOperationalFields
