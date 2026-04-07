@@ -14,6 +14,14 @@ const String _kHelpdeskAutoConnectOption = 'helpdesk-auto-connect';
 const String _kHelpdeskPolicyAcceptedVersionOption =
     'monitoring-helpdesk-policy-accepted-version';
 const String _kHelpdeskPolicyVersion = '2026-04-attended-support-v1';
+const Duration _kAuthorizedAgentRefreshInterval = Duration(minutes: 2);
+const Duration _kUnauthorizedAgentRefreshInterval = Duration(seconds: 30);
+const Duration _kBusyPresenceSyncInterval = Duration(seconds: 10);
+const Duration _kAvailablePresenceSyncInterval = Duration(minutes: 1);
+const Duration _kAwayPresenceSyncInterval = Duration(minutes: 2);
+const Duration _kBusyAssignmentRefreshInterval = Duration(seconds: 5);
+const Duration _kAvailableAssignmentRefreshInterval = Duration(seconds: 15);
+const Duration _kAwayAssignmentRefreshInterval = Duration(seconds: 30);
 
 class HelpdeskAgentSnapshot {
   final String agentId;
@@ -195,6 +203,9 @@ class HelpdeskModel with ChangeNotifier {
   String? _lastError;
   String? _lastTicketMessage;
   DateTime? _lastPresenceSyncAt;
+  DateTime? _lastPresenceAttemptAt;
+  DateTime? _lastAuthorizationAttemptAt;
+  DateTime? _lastAssignmentAttemptAt;
   HelpdeskAgentSnapshot? _agent;
   HelpdeskAssignmentSnapshot? _assignment;
   HelpdeskAgentAuthorizationSnapshot? _authorization;
@@ -397,6 +408,20 @@ class HelpdeskModel with ChangeNotifier {
       return;
     }
 
+    if (!force && !isAgentModeRequested) {
+      return;
+    }
+
+    if (!force &&
+        !_shouldRunNow(
+          _lastAuthorizationAttemptAt,
+          _authorization?.authorized == true
+              ? _kAuthorizedAgentRefreshInterval
+              : _kUnauthorizedAgentRefreshInterval,
+        )) {
+      return;
+    }
+
     final baseUrl = monitoringBaseUrl();
     if (baseUrl.isEmpty) {
       if (force) {
@@ -408,6 +433,7 @@ class HelpdeskModel with ChangeNotifier {
     }
 
     _syncingAuthorization = true;
+    _lastAuthorizationAttemptAt = DateTime.now();
     try {
       final agentId = await _resolveAgentId();
       if (agentId.isEmpty) {
@@ -901,7 +927,16 @@ class HelpdeskModel with ChangeNotifier {
       return;
     }
 
+    if (!force &&
+        !_shouldRunNow(
+          _lastPresenceAttemptAt,
+          _presenceSyncInterval(statusToSend),
+        )) {
+      return;
+    }
+
     _syncingPresence = true;
+    _lastPresenceAttemptAt = DateTime.now();
     try {
       final agentId = await _resolveAgentId();
       if (agentId.isEmpty) {
@@ -972,7 +1007,16 @@ class HelpdeskModel with ChangeNotifier {
       return;
     }
 
+    if (!force &&
+        !_shouldRunNow(
+          _lastAssignmentAttemptAt,
+          _assignmentRefreshInterval(),
+        )) {
+      return;
+    }
+
     _syncingAssignment = true;
+    _lastAssignmentAttemptAt = DateTime.now();
     try {
       final agentId = await _resolveAgentId();
       if (agentId.isEmpty) {
@@ -1082,6 +1126,9 @@ class HelpdeskModel with ChangeNotifier {
     final previousAgent = _agent;
     _agent = null;
     _lastPresenceSyncAt = null;
+    _lastPresenceAttemptAt = null;
+    _lastAuthorizationAttemptAt = null;
+    _lastAssignmentAttemptAt = null;
 
     if (!notifyBackend) {
       notifyListeners();
@@ -1154,6 +1201,40 @@ class HelpdeskModel with ChangeNotifier {
     } finally {
       notifyListeners();
     }
+  }
+
+  Duration _presenceSyncInterval(String status) {
+    switch (status) {
+      case 'opening':
+      case 'busy':
+        return _kBusyPresenceSyncInterval;
+      case 'away':
+        return _kAwayPresenceSyncInterval;
+      case 'available':
+      default:
+        return _kAvailablePresenceSyncInterval;
+    }
+  }
+
+  Duration _assignmentRefreshInterval() {
+    final status = effectiveStatus;
+    switch (status) {
+      case 'opening':
+      case 'busy':
+        return _kBusyAssignmentRefreshInterval;
+      case 'away':
+        return _kAwayAssignmentRefreshInterval;
+      case 'available':
+      default:
+        return _kAvailableAssignmentRefreshInterval;
+    }
+  }
+
+  bool _shouldRunNow(DateTime? lastAttemptAt, Duration interval) {
+    if (lastAttemptAt == null) {
+      return true;
+    }
+    return DateTime.now().difference(lastAttemptAt) >= interval;
   }
 
   void _setWaitingForClientApproval() {
