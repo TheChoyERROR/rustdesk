@@ -305,26 +305,37 @@ class _ConnectionPageState extends State<ConnectionPage>
   @override
   Widget build(BuildContext context) {
     final isOutgoingOnly = bind.isOutgoingOnly();
-    return Column(
-      children: [
-        Expanded(
-            child: Column(
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final maxHelpdeskHeight = max(
+          280.0,
+          min(420.0, constraints.maxHeight * 0.42),
+        );
+        return Column(
           children: [
-            Row(
+            Expanded(
+                child: Column(
               children: [
-                Flexible(child: _buildRemoteIDTextField(context)),
+                Row(
+                  children: [
+                    Flexible(child: _buildRemoteIDTextField(context)),
+                  ],
+                ).marginOnly(top: 22),
+                SizedBox(height: 12),
+                ConstrainedBox(
+                  constraints: BoxConstraints(maxHeight: maxHelpdeskHeight),
+                  child: const HelpdeskPanel(),
+                ).marginOnly(right: 12),
+                SizedBox(height: 12),
+                Divider().paddingOnly(right: 12),
+                Expanded(child: PeerTabPage()),
               ],
-            ).marginOnly(top: 22),
-            SizedBox(height: 12),
-            const HelpdeskPanel().marginOnly(right: 12),
-            SizedBox(height: 12),
-            Divider().paddingOnly(right: 12),
-            Expanded(child: PeerTabPage()),
+            ).paddingOnly(left: 12.0)),
+            if (!isOutgoingOnly) const Divider(height: 1),
+            if (!isOutgoingOnly) OnlineStatusWidget()
           ],
-        ).paddingOnly(left: 12.0)),
-        if (!isOutgoingOnly) const Divider(height: 1),
-        if (!isOutgoingOnly) OnlineStatusWidget()
-      ],
+        );
+      },
     );
   }
 

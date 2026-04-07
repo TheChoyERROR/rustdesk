@@ -43,9 +43,11 @@ class _AgentHelpdeskPanel extends StatelessWidget {
             borderRadius: const BorderRadius.all(Radius.circular(13)),
             border: Border.all(color: Theme.of(context).colorScheme.surface),
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
+          child: SingleChildScrollView(
+            primary: true,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -270,7 +272,8 @@ class _AgentHelpdeskPanel extends StatelessWidget {
                       ?.copyWith(color: Colors.grey[700]),
                 ),
               ),
-            ],
+              ],
+            ),
           ),
         );
       },
@@ -551,9 +554,11 @@ class _ClientHelpdeskPanelState extends State<_ClientHelpdeskPanel> {
             borderRadius: const BorderRadius.all(Radius.circular(13)),
             border: Border.all(color: Theme.of(context).colorScheme.surface),
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
+          child: SingleChildScrollView(
+            primary: true,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -818,7 +823,8 @@ class _ClientHelpdeskPanelState extends State<_ClientHelpdeskPanel> {
                       ?.copyWith(color: Colors.grey[700]),
                 ),
               ),
-            ],
+              ],
+            ),
           ),
         );
       },
