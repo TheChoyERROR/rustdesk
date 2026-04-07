@@ -166,6 +166,108 @@ class _AgentHelpdeskPanel extends StatelessWidget {
     );
   }
 
+  Future<void> _openSupportReportDialog(
+    BuildContext context,
+    HelpdeskModel model,
+  ) async {
+    final assignment = model.assignment;
+    if (assignment == null) {
+      return;
+    }
+
+    final reportController = TextEditingController(
+      text: assignment.ticket.latestAgentReport ?? '',
+    );
+    var localError = '';
+
+    final updated = await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) {
+            return StatefulBuilder(
+              builder: (dialogContext, setState) {
+                return AlertDialog(
+                  title: const Text('Support report'),
+                  content: SizedBox(
+                    width: 460,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Leave a clear handoff note so the dashboard and any next assigned agent can understand the current state of the ticket.',
+                        ),
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: reportController,
+                          minLines: 4,
+                          maxLines: 8,
+                          decoration: const InputDecoration(
+                            labelText: 'Report',
+                            alignLabelWithHint: true,
+                            border: OutlineInputBorder(),
+                          ),
+                        ),
+                        if (localError.trim().isNotEmpty) ...[
+                          const SizedBox(height: 10),
+                          Text(
+                            localError,
+                            style: TextStyle(color: Colors.red[700]),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: model.submittingAgentReport
+                          ? null
+                          : () => Navigator.of(dialogContext).pop(false),
+                      child: const Text('Cancel'),
+                    ),
+                    ElevatedButton(
+                      onPressed: model.submittingAgentReport
+                          ? null
+                          : () async {
+                              final saved = await model.submitAssignmentReport(
+                                note: reportController.text,
+                              );
+                              if (!dialogContext.mounted) {
+                                return;
+                              }
+                              if (saved) {
+                                Navigator.of(dialogContext).pop(true);
+                                return;
+                              }
+                              setState(() {
+                                localError = model.lastError ??
+                                    'Could not save the support report.';
+                              });
+                            },
+                      child: Text(
+                        model.submittingAgentReport
+                            ? 'Saving...'
+                            : 'Save report',
+                      ),
+                    ),
+                  ],
+                );
+              },
+            );
+          },
+        ) ??
+        false;
+
+    reportController.dispose();
+    if (!updated || !context.mounted) {
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Support report saved for the current ticket.'),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Consumer<HelpdeskModel>(
@@ -408,6 +510,52 @@ class _AgentHelpdeskPanel extends StatelessWidget {
                       if ((assignment.ticket.summary ?? '').trim().isNotEmpty &&
                           (assignment.ticket.title ?? '').trim().isEmpty)
                         Text('Summary: ${assignment.ticket.summary}'),
+                      if ((assignment.ticket.latestAgentReport ?? '')
+                          .trim()
+                          .isNotEmpty) ...[
+                        const SizedBox(height: 10),
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Theme.of(context)
+                                .colorScheme
+                                .surface
+                                .withOpacity(0.22),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Latest support report',
+                                style: Theme.of(context).textTheme.labelLarge,
+                              ),
+                              const SizedBox(height: 6),
+                              Text(assignment.ticket.latestAgentReport!),
+                              const SizedBox(height: 6),
+                              Text(
+                                [
+                                  if ((assignment.ticket.latestAgentReportBy ??
+                                          '')
+                                      .trim()
+                                      .isNotEmpty)
+                                    assignment.ticket.latestAgentReportBy!,
+                                  if (assignment.ticket.latestAgentReportAt !=
+                                      null)
+                                    _formatDateTime(
+                                      assignment.ticket.latestAgentReportAt!,
+                                    ),
+                                ].join(' · '),
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .bodySmall
+                                    ?.copyWith(color: Colors.grey[700]),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                       const SizedBox(height: 10),
                       Wrap(
                         spacing: 10,
@@ -440,6 +588,19 @@ class _AgentHelpdeskPanel extends StatelessWidget {
                                     : 'Resolve ticket',
                               ),
                             ),
+                          OutlinedButton(
+                            onPressed: model.submittingAgentReport
+                                ? null
+                                : () => _openSupportReportDialog(
+                                      context,
+                                      model,
+                                    ),
+                            child: Text(
+                              model.submittingAgentReport
+                                  ? 'Saving report...'
+                                  : 'Leave support report',
+                            ),
+                          ),
                         ],
                       ),
                     ],
@@ -977,4 +1138,11 @@ String _difficultyLabel(String? rawDifficulty) {
     default:
       return 'Medium';
   }
+}
+
+String _formatDateTime(DateTime value) {
+  final local = value.toLocal();
+  String twoDigits(int input) => input.toString().padLeft(2, '0');
+  return '${twoDigits(local.day)}/${twoDigits(local.month)}/${local.year} '
+      '${twoDigits(local.hour)}:${twoDigits(local.minute)}';
 }

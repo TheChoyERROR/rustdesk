@@ -60,6 +60,9 @@ class HelpdeskTicketSnapshot {
   final String? summary;
   final String status;
   final String? assignedAgentId;
+  final String? latestAgentReport;
+  final String? latestAgentReportBy;
+  final DateTime? latestAgentReportAt;
   final DateTime? openingDeadlineAt;
   final DateTime? createdAt;
   final DateTime? updatedAt;
@@ -77,6 +80,9 @@ class HelpdeskTicketSnapshot {
     this.summary,
     required this.status,
     this.assignedAgentId,
+    this.latestAgentReport,
+    this.latestAgentReportBy,
+    this.latestAgentReportAt,
     this.openingDeadlineAt,
     this.createdAt,
     this.updatedAt,
@@ -96,6 +102,9 @@ class HelpdeskTicketSnapshot {
       summary: _optionalTrimmedString(json['summary']),
       status: (json['status'] ?? '').toString(),
       assignedAgentId: _optionalTrimmedString(json['assigned_agent_id']),
+      latestAgentReport: _optionalTrimmedString(json['latest_agent_report']),
+      latestAgentReportBy: _optionalTrimmedString(json['latest_agent_report_by']),
+      latestAgentReportAt: _parseDateTime(json['latest_agent_report_at']),
       openingDeadlineAt: _parseDateTime(json['opening_deadline_at']),
       createdAt: _parseDateTime(json['created_at']),
       updatedAt: _parseDateTime(json['updated_at']),
@@ -170,6 +179,7 @@ class HelpdeskModel with ChangeNotifier {
   bool _startingAssignment = false;
   bool _resolvingAssignment = false;
   bool _updatingOperationalFields = false;
+  bool _submittingAgentReport = false;
   bool _waitingForClientApproval = false;
 
   String _desiredStatus = _normalizeDesiredStatus(
@@ -241,6 +251,7 @@ class HelpdeskModel with ChangeNotifier {
   bool get startingAssignment => _startingAssignment;
   bool get resolvingAssignment => _resolvingAssignment;
   bool get updatingOperationalFields => _updatingOperationalFields;
+  bool get submittingAgentReport => _submittingAgentReport;
   bool get hasActiveAssignment => _assignment != null;
   bool get canAcceptAssignment => _assignment?.ticket.status == 'opening';
   bool get canResolveAssignment => _assignment?.ticket.status == 'in_progress';
@@ -595,6 +606,73 @@ class HelpdeskModel with ChangeNotifier {
       return false;
     } finally {
       _updatingOperationalFields = false;
+      notifyListeners();
+    }
+  }
+
+  Future<bool> submitAssignmentReport({
+    required String note,
+  }) async {
+    if (!isAgentModeEnabled || _submittingAgentReport || _assignment == null) {
+      return false;
+    }
+
+    final ticket = _assignment!.ticket;
+    final agentId = await _resolveAgentId();
+    final baseUrl = monitoringBaseUrl();
+    if (agentId.isEmpty || baseUrl.isEmpty) {
+      _lastError = 'Monitoring server URL or RustDesk ID is missing.';
+      notifyListeners();
+      return false;
+    }
+
+    final trimmedNote = note.trim();
+    if (trimmedNote.isEmpty) {
+      _lastError = 'Support report cannot be empty.';
+      notifyListeners();
+      return false;
+    }
+
+    _submittingAgentReport = true;
+    _lastError = null;
+    notifyListeners();
+
+    try {
+      final response = await http_service.post(
+        Uri.parse(
+          '$baseUrl/api/v1/helpdesk/tickets/${Uri.encodeComponent(ticket.ticketId)}/report',
+        ),
+        body: jsonEncode({
+          'agent_id': agentId,
+          'note': trimmedNote,
+        }),
+      );
+
+      final payload = _decodeJsonBody(response.body);
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw Exception(_responseMessage(payload, response.body));
+      }
+
+      final ticketJson = payload['ticket'];
+      if (ticketJson is! Map) {
+        throw Exception('Agent report response is missing the ticket.');
+      }
+
+      final nextTicket = HelpdeskTicketSnapshot.fromJson(
+        Map<String, dynamic>.from(ticketJson),
+      );
+      final currentAgent = _agent ?? _assignment!.agent;
+      _assignment = HelpdeskAssignmentSnapshot(
+        ticket: nextTicket,
+        agent: currentAgent,
+      );
+      showToast('Support report saved for this ticket.');
+      return true;
+    } catch (error) {
+      _lastError = 'Failed to save support report: $error';
+      return false;
+    } finally {
+      _submittingAgentReport = false;
       notifyListeners();
     }
   }
