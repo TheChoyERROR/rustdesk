@@ -661,13 +661,43 @@ class _ClientHelpdeskPanel extends StatefulWidget {
 class _ClientHelpdeskPanelState extends State<_ClientHelpdeskPanel> {
   final _titleController = TextEditingController();
   final _descriptionController = TextEditingController();
+  final _agentTokenController = TextEditingController();
   int _handledComposerNonce = 0;
+  bool _savingAgentToken = false;
 
   @override
   void dispose() {
     _titleController.dispose();
     _descriptionController.dispose();
+    _agentTokenController.dispose();
     super.dispose();
+  }
+
+  Future<void> _saveAgentToken(HelpdeskModel model) async {
+    if (_savingAgentToken) {
+      return;
+    }
+
+    setState(() {
+      _savingAgentToken = true;
+    });
+    try {
+      await model.saveAgentToken(_agentTokenController.text);
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Helpdesk agent token saved on this device.'),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _savingAgentToken = false;
+        });
+      }
+    }
   }
 
   Future<bool> _ensureClientSupportPolicyAccepted(HelpdeskModel model,
@@ -848,6 +878,20 @@ class _ClientHelpdeskPanelState extends State<_ClientHelpdeskPanel> {
             !model.isAgentAuthorized;
         final requestedPendingAuthorization =
             requestedAgentMode && !authorizationKnown;
+        final requestedAuthorizedButMissingToken =
+            requestedAgentMode &&
+            model.isAgentAuthorized &&
+            !model.hasConfiguredAgentToken &&
+            model.isAgentTokenRequired;
+
+        if (_agentTokenController.text != model.configuredAgentToken) {
+          _agentTokenController.value = TextEditingValue(
+            text: model.configuredAgentToken,
+            selection: TextSelection.collapsed(
+              offset: model.configuredAgentToken.length,
+            ),
+          );
+        }
 
         if (model.ticketComposerRequestNonce > _handledComposerNonce) {
           _handledComposerNonce = model.ticketComposerRequestNonce;
@@ -920,7 +964,8 @@ class _ClientHelpdeskPanelState extends State<_ClientHelpdeskPanel> {
                 ],
               ),
               if (requestedButUnauthorized ||
-                  requestedPendingAuthorization) ...[
+                  requestedPendingAuthorization ||
+                  requestedAuthorizedButMissingToken) ...[
                 const SizedBox(height: 12),
                 Container(
                   width: double.infinity,
@@ -933,11 +978,84 @@ class _ClientHelpdeskPanelState extends State<_ClientHelpdeskPanel> {
                   child: Text(
                     requestedButUnauthorized
                         ? 'This device requested helpdesk agent mode, but the dashboard has not authorized it as an operator. It will stay in client mode.'
-                        : 'Validating whether this device is authorized as an operator. Until then, it stays in client mode.',
+                        : requestedAuthorizedButMissingToken
+                            ? 'This device is authorized as an operator, but it still needs the helpdesk agent token generated in the dashboard before agent mode can activate.'
+                            : 'Validating whether this device is authorized as an operator. Until then, it stays in client mode.',
                     style: Theme.of(context)
                         .textTheme
                         .bodySmall
                         ?.copyWith(color: Colors.grey[700]),
+                  ),
+                ),
+              ],
+              if (requestedAuthorizedButMissingToken) ...[
+                const SizedBox(height: 12),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.surface.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Helpdesk agent token',
+                        style: Theme.of(context).textTheme.titleSmall,
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Paste the token generated in the dashboard for this RustDesk ID. Once saved, this device can switch from client mode to the agent console.',
+                        style: Theme.of(context)
+                            .textTheme
+                            .bodySmall
+                            ?.copyWith(color: Colors.grey[700]),
+                      ),
+                      if ((model.agentTokenHint ?? '').trim().isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          'Dashboard token hint: ${model.agentTokenHint}',
+                          style: Theme.of(context)
+                              .textTheme
+                              .bodySmall
+                              ?.copyWith(color: Colors.grey[700]),
+                        ),
+                      ],
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: _agentTokenController,
+                        obscureText: true,
+                        decoration: const InputDecoration(
+                          labelText: 'Agent token',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Wrap(
+                        spacing: 12,
+                        runSpacing: 12,
+                        children: [
+                          ElevatedButton(
+                            onPressed: _savingAgentToken
+                                ? null
+                                : () => _saveAgentToken(model),
+                            child: Text(
+                              _savingAgentToken ? 'Saving...' : 'Save token',
+                            ),
+                          ),
+                          OutlinedButton(
+                            onPressed: _savingAgentToken
+                                ? null
+                                : () {
+                                    _agentTokenController.clear();
+                                    model.saveAgentToken('');
+                                  },
+                            child: const Text('Clear token'),
+                          ),
+                        ],
+                      ),
+                    ],
                   ),
                 ),
               ],

@@ -11,6 +11,7 @@ import 'package:flutter_hbb/utils/monitoring_profile.dart';
 
 const String _kHelpdeskStatusOption = 'helpdesk-agent-status';
 const String _kHelpdeskAutoConnectOption = 'helpdesk-auto-connect';
+const String _kHelpdeskAgentTokenHeader = 'x-helpdesk-agent-token';
 const String _kHelpdeskPolicyAcceptedVersionOption =
     'monitoring-helpdesk-policy-accepted-version';
 const String _kHelpdeskPolicyVersion = '2026-04-attended-support-v1';
@@ -153,11 +154,15 @@ class HelpdeskAgentAuthorizationSnapshot {
   final String agentId;
   final bool authorized;
   final String? displayName;
+  final bool tokenConfigured;
+  final String? tokenHint;
 
   const HelpdeskAgentAuthorizationSnapshot({
     required this.agentId,
     required this.authorized,
     this.displayName,
+    required this.tokenConfigured,
+    this.tokenHint,
   });
 
   factory HelpdeskAgentAuthorizationSnapshot.fromJson(
@@ -166,6 +171,8 @@ class HelpdeskAgentAuthorizationSnapshot {
       agentId: (json['agent_id'] ?? '').toString(),
       authorized: json['authorized'] == true,
       displayName: _optionalTrimmedString(json['display_name']),
+      tokenConfigured: json['token_configured'] == true,
+      tokenHint: _optionalTrimmedString(json['token_hint']),
     );
   }
 }
@@ -270,7 +277,12 @@ class HelpdeskModel with ChangeNotifier {
   bool get waitingForClientApproval => _waitingForClientApproval;
   bool get isAgentModeRequested => monitoringHelpdeskAgentModeEnabled();
   bool get isAgentAuthorized => _authorization?.authorized == true;
-  bool get isAgentModeEnabled => isAgentModeRequested && isAgentAuthorized;
+  bool get isAgentTokenRequired => _authorization?.tokenConfigured == true;
+  String? get agentTokenHint => _authorization?.tokenHint;
+  String get configuredAgentToken => monitoringHelpdeskAgentToken();
+  bool get hasConfiguredAgentToken => configuredAgentToken.trim().isNotEmpty;
+  bool get isAgentModeEnabled =>
+      isAgentModeRequested && isAgentAuthorized && hasConfiguredAgentToken;
   bool get isAgentAuthorizationKnown => _authorization != null;
   int get ticketComposerRequestNonce => _ticketComposerRequestNonce;
   String get profileDisplayName => monitoringDisplayName();
@@ -444,6 +456,7 @@ class HelpdeskModel with ChangeNotifier {
         Uri.parse(
           '$baseUrl/api/v1/helpdesk/agents/${Uri.encodeComponent(agentId)}/authorization',
         ),
+        headers: _agentJsonHeaders(),
       );
       final payload = _decodeJsonBody(response.body);
       if (response.statusCode < 200 || response.statusCode >= 300) {
@@ -601,7 +614,9 @@ class HelpdeskModel with ChangeNotifier {
         Uri.parse(
           '$baseUrl/api/v1/helpdesk/tickets/${Uri.encodeComponent(ticket.ticketId)}/operational',
         ),
+        headers: _agentJsonHeaders(),
         body: jsonEncode({
+          'agent_id': await _resolveAgentId(),
           'difficulty': normalizedDifficulty,
           'estimated_minutes': estimatedMinutes,
         }),
@@ -668,6 +683,7 @@ class HelpdeskModel with ChangeNotifier {
         Uri.parse(
           '$baseUrl/api/v1/helpdesk/tickets/${Uri.encodeComponent(ticket.ticketId)}/report',
         ),
+        headers: _agentJsonHeaders(),
         body: jsonEncode({
           'agent_id': agentId,
           'note': trimmedNote,
@@ -769,6 +785,7 @@ class HelpdeskModel with ChangeNotifier {
         Uri.parse(
           '$baseUrl/api/v1/helpdesk/agents/${Uri.encodeComponent(agentId)}/assignment/start',
         ),
+        headers: _agentJsonHeaders(),
         body: jsonEncode({'ticket_id': ticket.ticketId}),
       );
       final payload = _decodeJsonBody(response.body);
@@ -862,6 +879,7 @@ class HelpdeskModel with ChangeNotifier {
         Uri.parse(
           '$baseUrl/api/v1/helpdesk/tickets/${Uri.encodeComponent(ticket.ticketId)}/resolve',
         ),
+        headers: _agentJsonHeaders(),
         body: jsonEncode({
           'agent_id': agentId,
           'next_agent_status': nextAgentStatus,
@@ -927,6 +945,10 @@ class HelpdeskModel with ChangeNotifier {
       return;
     }
 
+    if (!_ensureAgentTokenConfigured()) {
+      return;
+    }
+
     if (!force &&
         !_shouldRunNow(
           _lastPresenceAttemptAt,
@@ -946,6 +968,7 @@ class HelpdeskModel with ChangeNotifier {
       final avatarUrl = await _resolveAvatarPayload();
       final response = await http_service.post(
         Uri.parse('$baseUrl/api/v1/helpdesk/agents/presence'),
+        headers: _agentJsonHeaders(),
         body: jsonEncode({
           'agent_id': agentId,
           'display_name': _displayNameOrFallback(agentId),
@@ -1007,6 +1030,10 @@ class HelpdeskModel with ChangeNotifier {
       return;
     }
 
+    if (!_ensureAgentTokenConfigured()) {
+      return;
+    }
+
     if (!force &&
         !_shouldRunNow(
           _lastAssignmentAttemptAt,
@@ -1028,6 +1055,7 @@ class HelpdeskModel with ChangeNotifier {
         Uri.parse(
           '$baseUrl/api/v1/helpdesk/agents/${Uri.encodeComponent(agentId)}/assignment',
         ),
+        headers: _agentJsonHeaders(),
       );
       final payload = _decodeJsonBody(response.body);
       if (response.statusCode < 200 || response.statusCode >= 300) {
@@ -1151,6 +1179,7 @@ class HelpdeskModel with ChangeNotifier {
       final avatarUrl = await _resolveAvatarPayload();
       final response = await http_service.post(
         Uri.parse('$baseUrl/api/v1/helpdesk/agents/presence'),
+        headers: _agentJsonHeaders(),
         body: jsonEncode({
           'agent_id': agentId,
           'display_name': _displayNameOrFallback(agentId),
@@ -1256,6 +1285,38 @@ class HelpdeskModel with ChangeNotifier {
     if (notify) {
       notifyListeners();
     }
+  }
+
+  Future<void> saveAgentToken(String rawToken) async {
+    final normalized = rawToken.trim();
+    await bind.mainSetLocalOption(
+      key: kMonitoringHelpdeskAgentTokenOption,
+      value: normalized,
+    );
+    _lastError = null;
+    notifyListeners();
+    await refreshNow();
+  }
+
+  Map<String, String> _agentJsonHeaders() {
+    final headers = <String, String>{
+      'Content-Type': 'application/json',
+    };
+    final token = configuredAgentToken.trim();
+    if (token.isNotEmpty) {
+      headers[_kHelpdeskAgentTokenHeader] = token;
+    }
+    return headers;
+  }
+
+  bool _ensureAgentTokenConfigured() {
+    if (configuredAgentToken.trim().isNotEmpty) {
+      return true;
+    }
+    _lastError =
+        'This agent requires a helpdesk token. Paste the token generated in the dashboard for this RustDesk ID.';
+    notifyListeners();
+    return false;
   }
 }
 

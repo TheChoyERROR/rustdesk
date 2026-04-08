@@ -11,6 +11,8 @@ const String kMonitoringServerLegacyOption = 'monitoring-server';
 const String kMonitoringDisplayNameOption = 'monitoring-display-name';
 const String kMonitoringAvatarUrlOption = 'monitoring-avatar-url';
 const String kMonitoringAvatarPathOption = 'monitoring-avatar-path';
+const String kMonitoringHelpdeskAgentTokenOption =
+    'monitoring-helpdesk-agent-token';
 const String kMonitoringHelpdeskAgentModeOption =
     'monitoring-helpdesk-agent-mode';
 const String kMonitoringOpenHelpdeskRequestOption =
@@ -104,6 +106,12 @@ bool monitoringHelpdeskAgentModeEnabled() {
 
   final normalized = rawValue.toUpperCase();
   return normalized == 'Y' || normalized == 'TRUE' || normalized == '1';
+}
+
+String monitoringHelpdeskAgentToken() {
+  return _safeBindString(
+    bind.mainGetLocalOption(key: kMonitoringHelpdeskAgentTokenOption),
+  );
 }
 
 String? validateMonitoringAvatarInput(String rawInput) {
